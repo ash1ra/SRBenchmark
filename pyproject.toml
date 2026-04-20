@@ -1,0 +1,19 @@
+[project]
+name = "SRBenchmark"
+version = "1.0.0"
+description = "Automated benchmark for Super-Resolution neural network models"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "einops>=0.8.2",
+    "numpy>=2.4.4",
+    "packaging>=26.1",
+    "pyyaml>=6.0.3",
+    "safetensors>=0.7.0",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+]
+
+[tool.ruff]
+line-length = 120
+
