@@ -1,0 +1,13 @@
+experiment_name: "SwinIR_x4"
+model_params:
+  in_channels: 3
+  hidden_channels: 180
+  train_img_size: [48, 48]
+  num_rstb_blocks: 6
+  num_stl_blocks: 6
+  num_heads: 6
+  window_size: 8
+  mlp_ratio: 2
+  scaling_factor: 4
+  use_gradient_checkpointing: False
+weights_path: "weights/weights.safetensors"

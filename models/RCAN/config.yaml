@@ -1,0 +1,9 @@
+experiment_name: "RCAN_x4"
+model_params:
+  channels_count: 64
+  kernel_size: 3
+  reduction: 16
+  rg_count: 10
+  rcab_count: 20
+  scaling_factor: 4
+weights_path: "weights/weights.safetensors"

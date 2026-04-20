@@ -1,0 +1,10 @@
+experiment_name: "ESRGAN_x4"
+model_params:
+  channels_count: 64
+  growth_channels_count: 32
+  large_kernel_size: 9
+  small_kernel_size: 3
+  res_dense_blocks_count: 3
+  rrdb_count: 23
+  scaling_factor: 4
+weights_path: "weights/weights.safetensors"

@@ -1,0 +1,8 @@
+experiment_name: "SRResNet_x4"
+model_params:
+  n_channels: 96
+  large_kernel_size: 9
+  small_kernel_size: 3
+  n_res_blocks: 16
+  scaling_factor: 4
+weights_path: "weights/weights.safetensors"

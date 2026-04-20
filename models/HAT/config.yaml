@@ -1,0 +1,17 @@
+experiment_name: "HAT_x4"
+model_params:
+  in_channels: 3
+  num_rhag_blocks: 6
+  num_hab_blocks: 6
+  num_channels: 180
+  compress_ratio: 3
+  squeeze_factor: 30
+  window_size: 16
+  num_heads: 6
+  cab_scale: 0.01
+  train_img_size: [64, 64]
+  mlp_ratio: 2
+  overlap_ratio: 0.5
+  scaling_factor: 4
+  use_gradient_checkpointing: False
+weights_path: "weights/weights.safetensors"
