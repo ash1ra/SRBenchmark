@@ -23,7 +23,7 @@ class Evaluator:
         self,
         config_path: Path,
         device: Literal["cpu", "cuda"] = "cpu",
-        tile_size: int = 256,
+        tile_size: int | None = None,
         tile_overlap: int = 32,
         num_workers: int = 4,
         prefetch_factor: int = 4,
@@ -57,6 +57,8 @@ class Evaluator:
         self.model.eval()
 
     def _run_model_tiled(self, lr_img_tensor: Tensor) -> Tensor:
+        assert self.tile_size is not None
+
         num_channels, lr_img_height, lr_img_width = lr_img_tensor.shape
 
         sr_img_height = lr_img_height * self.scaling_factor
@@ -76,6 +78,8 @@ class Evaluator:
         if lr_img_width < self.tile_size:
             width_steps = [0]
 
+        pbar = tqdm(total=len(height_steps) * len(width_steps), desc="Processing tiles", leave=False)
+
         for height_step in height_steps:
             for width_step in width_steps:
                 lr_height_end = min(height_step + self.tile_size, lr_img_height)
@@ -86,8 +90,13 @@ class Evaluator:
                 lr_img_patch = lr_img_tensor[:, lr_height_start:lr_height_end, lr_width_start:lr_width_end]
                 lr_img_patch = lr_img_patch.to(self.device)
 
-                with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=True):
-                    sr_img_patch = self.model(lr_img_patch.unsqueeze(0)).squeeze(0).cpu()
+                pad = 16
+                lr_img_patch_padded = F.pad(lr_img_patch, (pad, pad, pad, pad), mode="reflect")
+
+                sr_img_patch_padded = self.model(lr_img_patch_padded.unsqueeze(0)).squeeze(0).cpu()
+
+                sr_pad = pad * self.scaling_factor
+                sr_img_patch = sr_img_patch_padded[:, sr_pad:-sr_pad, sr_pad:-sr_pad]
 
                 sr_height_end = lr_height_end * self.scaling_factor
                 sr_width_end = lr_width_end * self.scaling_factor
@@ -97,9 +106,15 @@ class Evaluator:
                 sr_accumulated_values[:, sr_height_start:sr_height_end, sr_width_start:sr_width_end] += sr_img_patch
                 sr_weight_map[:, sr_height_start:sr_height_end, sr_width_start:sr_width_end] += 1.0
 
-        return sr_accumulated_values.div_(sr_weight_map)
+                pbar.update(1)
+        pbar.close()
+
+        return sr_accumulated_values.div_(sr_weight_map.clamp(min=1e-6)).to(self.device)
 
     def _run_model(self, lr_img_tensor: Tensor) -> Tensor:
+        if self.tile_size is not None and self.tile_size > 0:
+            return self._run_model_tiled(lr_img_tensor)
+
         window_size = self.config.get("model_params", {}).get("window_size", 16)
 
         _, lr_img_height, lr_img_width = lr_img_tensor.shape
@@ -112,19 +127,6 @@ class Evaluator:
             lr_tensor_padded = lr_img_tensor
 
         sr_tensor_padded = self.model(lr_tensor_padded.unsqueeze(0)).squeeze(0)
-        oom_caught = False
-        try:
-            sr_tensor_padded = self.model(lr_tensor_padded)
-        except RuntimeError as e:
-            if "out of memory" in str(e).lower() or "oom" in str(e).lower():
-                oom_caught = True
-            else:
-                raise e
-
-        if oom_caught:
-            torch.cuda.empty_cache()
-            tqdm.write("\n[OOM Защита] Нехватка VRAM. Переход на тайлинг...")
-            return self._run_model_tiled(lr_img_tensor)
 
         if padding_right > 0 or padding_bottom > 0:
             sr_img_tensor = sr_tensor_padded[
@@ -247,6 +249,7 @@ if __name__ == "__main__":
     evaluator = Evaluator(
         config_path=Path("models/HAT/config.yaml"),
         device="cuda",
+        tile_size=256,
     )
 
     evaluator.upscale("images/hr_img_1.jpg", "results/sr_img_1.png")
