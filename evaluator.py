@@ -239,10 +239,31 @@ class Evaluator:
         self._print_results_table(results)
 
     @torch.inference_mode()
-    def upscale(self, img_path: str | Path, output_path: str | Path) -> None:
-        lr_img_tensor = self._preprocess_img(Path(img_path))
+    def upscale(self, img_path: Path, output_path: Path) -> None:
+        lr_img_tensor = self._preprocess_img(img_path)
         sr_img_tensor = self._run_model(lr_img_tensor)
-        self._save_img(sr_img_tensor, Path(output_path))
+        self._save_img(sr_img_tensor, output_path)
+
+    @torch.inference_mode()
+    def upscale_downscaled(self, img_path: Path, output_path: Path) -> None:
+        hr_img_tensor = self._preprocess_img(img_path)
+        _, hr_img_height, hr_img_width = hr_img_tensor.shape
+
+        lr_img_height = hr_img_height // self.scaling_factor
+        lr_img_width = hr_img_width // self.scaling_factor
+
+        lr_img_tensor = F.interpolate(
+            hr_img_tensor.unsqueeze(0),
+            size=(lr_img_height, lr_img_width),
+            mode="bicubic",
+            antialias=True,
+        ).clamp(0, 1)
+
+        print(lr_img_tensor.min(), lr_img_tensor.max())
+
+        sr_img_tensor = self._run_model(lr_img_tensor.squeeze(0))
+
+        self._save_img(sr_img_tensor, output_path)
 
 
 if __name__ == "__main__":
@@ -252,7 +273,7 @@ if __name__ == "__main__":
         tile_size=256,
     )
 
-    evaluator.upscale("images/hr_img_1.jpg", "results/sr_img_1.png")
+    evaluator.upscale_downscaled(Path("images/hr_img_1.jpg"), Path("results/sr_img_1.png"))
     # evaluator.evaluate(
     #     [Path("data/Set5"), Path("data/Set14"), Path("data/BSDS100"), Path("data/Urban100"), Path("data/Manga109")]
     # )
