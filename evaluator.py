@@ -13,7 +13,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torchvision.io import ImageReadMode, read_image, write_png
 from tqdm import tqdm
-
+from ptflops import get_model_complexity_info
 from dataset import BenchmarkDataset
 from utils import calculate_psnr, calculate_ssim
 
@@ -218,8 +218,24 @@ class Evaluator:
 
         print(f"{'=' * 82}\n")
 
+    def print_model_stats(self, input_shape: tuple[int, int, int] = (3, 64, 64)) -> None:
+        macs, params = get_model_complexity_info(
+            model=self.model,
+            input_res=input_shape,
+            as_strings=False,
+            print_per_layer_stat=False,
+            verbose=False,
+        )
+
+        print(f"Model architecture: {self.model_name}")
+        print(f"Input shape: {input_shape}")
+        print(f"Params: {params / 1e6:.2f} M")  # type: ignore
+        print(f"FLOPs: {macs * 2 / 1e9:.2f} G")  # type: ignore
+
     @torch.inference_mode()
     def evaluate(self, dataset_paths: list[Path]) -> None:
+        self.print_model_stats()
+
         warnings.filterwarnings("ignore", category=UserWarning)
 
         self.perceptual_metrics = {
@@ -270,10 +286,11 @@ if __name__ == "__main__":
     evaluator = Evaluator(
         config_path=Path("models/HAT/config.yaml"),
         device="cuda",
-        tile_size=256,
+        # tile_size=256,
     )
 
-    evaluator.upscale_downscaled(Path("images/hr_img_1.jpg"), Path("results/sr_img_1.png"))
-    # evaluator.evaluate(
-    #     [Path("data/Set5"), Path("data/Set14"), Path("data/BSDS100"), Path("data/Urban100"), Path("data/Manga109")]
-    # )
+    # evaluator.print_model_stats()
+    # evaluator.upscale_downscaled(Path("images/hr_img_1.jpg"), Path("results/sr_img_1.png"))
+    evaluator.evaluate(
+        [Path("data/Set5"), Path("data/Set14"), Path("data/BSDS100"), Path("data/Urban100"), Path("data/Manga109")]
+    )
