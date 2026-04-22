@@ -1,5 +1,7 @@
 import importlib
+import io
 import warnings
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Literal, cast
 
@@ -7,13 +9,14 @@ import numpy as np
 import pyiqa
 import torch
 import yaml
+from ptflops import get_model_complexity_info
 from safetensors.torch import load_file
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from torchvision.io import ImageReadMode, read_image, write_png
+from torchvision.io import ImageReadMode, read_image
 from tqdm import tqdm
-from ptflops import get_model_complexity_info
+
 from dataset import BenchmarkDataset
 from utils import calculate_psnr, calculate_ssim
 
@@ -143,13 +146,6 @@ class Evaluator:
 
         return img_tensor.to(self.device)
 
-    def _save_img(self, img_tensor: Tensor, save_path: Path) -> None:
-        img_tensor = img_tensor.cpu().clamp(0, 1)
-        img_tensor = (img_tensor * 255.0).to(torch.uint8)
-
-        save_path.parent.mkdir(exist_ok=True, parents=True)
-        write_png(img_tensor, str(save_path))
-
     def _init_dataloader(self, dataset_path: Path) -> DataLoader:
         dataset = BenchmarkDataset(dataset_path, scaling_factor=self.scaling_factor)
         dataloader = DataLoader(
@@ -197,52 +193,16 @@ class Evaluator:
             "MUSIQ": float(np.mean(scores["musiq"])),
         }
 
-    def _print_results_table(self, results: dict[str, dict[str, float]]) -> None:
-        print(f"\n{'=' * 82}")
-        print(f"{'Benchmark: ' + self.model_name:^82}")
-        print(f"{'-' * 82}")
-        print(
-            f"{'Dataset':<15} | {'PSNR (↑)':<10} | {'SSIM (↑)':<10} | {'LPIPS (↓)':<10} | {'CLIPIQA (↑)':<11} | {'MUSIQ (↑)':<10}"
-        )
-        print(f"{'-' * 82}")
-
-        for dataset_name, metrics in results.items():
-            print(
-                f"{dataset_name:<15} | "
-                f"{metrics['PSNR']:>10.2f} | "
-                f"{metrics['SSIM']:>10.4f} | "
-                f"{metrics['LPIPS']:>10.4f} | "
-                f"{metrics['CLIPIQA']:>11.4f} | "
-                f"{metrics['MUSIQ']:>10.2f}"
-            )
-
-        print(f"{'=' * 82}\n")
-
-    def print_model_stats(self, input_shape: tuple[int, int, int] = (3, 64, 64)) -> None:
-        macs, params = get_model_complexity_info(
-            model=self.model,
-            input_res=input_shape,
-            as_strings=False,
-            print_per_layer_stat=False,
-            verbose=False,
-        )
-
-        print(f"Model architecture: {self.model_name}")
-        print(f"Input shape: {input_shape}")
-        print(f"Params: {params / 1e6:.2f} M")  # type: ignore
-        print(f"FLOPs: {macs * 2 / 1e9:.2f} G")  # type: ignore
-
     @torch.inference_mode()
-    def evaluate(self, dataset_paths: list[Path]) -> None:
-        self.print_model_stats()
-
+    def evaluate(self, dataset_paths: list[Path]) -> dict[str, dict[str, float]]:
         warnings.filterwarnings("ignore", category=UserWarning)
 
-        self.perceptual_metrics = {
-            "lpips": pyiqa.create_metric("lpips", as_loss=False, device=self.device),
-            "clipiqa": pyiqa.create_metric("clipiqa", as_loss=False, device=self.device),
-            "musiq": pyiqa.create_metric("musiq", as_loss=False, device=self.device),
-        }
+        with redirect_stdout(io.StringIO()):
+            self.perceptual_metrics = {
+                "lpips": pyiqa.create_metric("lpips", as_loss=False, device=self.device),
+                "clipiqa": pyiqa.create_metric("clipiqa", as_loss=False, device=self.device),
+                "musiq": pyiqa.create_metric("musiq", as_loss=False, device=self.device),
+            }
 
         warnings.filterwarnings("default", category=UserWarning)
 
@@ -252,45 +212,37 @@ class Evaluator:
             dataloader = self._init_dataloader(dataset_path)
             results[dataset_path.name] = self._evaluate_one_dataset(dataloader, dataset_path.name)
 
-        self._print_results_table(results)
+        return results
 
     @torch.inference_mode()
-    def upscale(self, img_path: Path, output_path: Path) -> None:
-        lr_img_tensor = self._preprocess_img(img_path)
-        sr_img_tensor = self._run_model(lr_img_tensor)
-        self._save_img(sr_img_tensor, output_path)
+    def upscale(self, img_tensor: Tensor) -> Tensor:
+        return self._run_model(img_tensor.to(self.device))
 
     @torch.inference_mode()
-    def upscale_downscaled(self, img_path: Path, output_path: Path) -> None:
-        hr_img_tensor = self._preprocess_img(img_path)
-        _, hr_img_height, hr_img_width = hr_img_tensor.shape
+    def upscale_downscaled(self, img_tensor: Tensor) -> Tensor:
+        img_tensor = img_tensor.to(self.device)
 
-        lr_img_height = hr_img_height // self.scaling_factor
-        lr_img_width = hr_img_width // self.scaling_factor
+        _, img_height, img_width = img_tensor.shape
+
+        lr_img_height = img_height // self.scaling_factor
+        lr_img_width = img_width // self.scaling_factor
 
         lr_img_tensor = F.interpolate(
-            hr_img_tensor.unsqueeze(0),
+            img_tensor.unsqueeze(0),
             size=(lr_img_height, lr_img_width),
             mode="bicubic",
             antialias=True,
         ).clamp(0, 1)
 
-        print(lr_img_tensor.min(), lr_img_tensor.max())
+        return self._run_model(lr_img_tensor.squeeze(0))
 
-        sr_img_tensor = self._run_model(lr_img_tensor.squeeze(0))
+    def get_model_stats(self, input_shape: tuple[int, int, int] = (3, 64, 64)) -> dict[str, str | float]:
+        macs, params = get_model_complexity_info(
+            model=self.model,
+            input_res=input_shape,
+            as_strings=False,
+            print_per_layer_stat=False,
+            verbose=False,
+        )
 
-        self._save_img(sr_img_tensor, output_path)
-
-
-if __name__ == "__main__":
-    evaluator = Evaluator(
-        config_path=Path("models/HAT/config.yaml"),
-        device="cuda",
-        # tile_size=256,
-    )
-
-    # evaluator.print_model_stats()
-    # evaluator.upscale_downscaled(Path("images/hr_img_1.jpg"), Path("results/sr_img_1.png"))
-    evaluator.evaluate(
-        [Path("data/Set5"), Path("data/Set14"), Path("data/BSDS100"), Path("data/Urban100"), Path("data/Manga109")]
-    )
+        return {"model_name": self.model_name, "params": params, "macs": macs}  # type: ignore
