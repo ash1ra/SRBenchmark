@@ -57,17 +57,16 @@ class Evaluator:
         self.model.eval()
 
     def _run_model_tiled(self, lr_img_tensor: Tensor) -> Tensor:
-        batch_size, channels, lr_img_height, lr_img_width = lr_img_tensor.shape
+        num_channels, lr_img_height, lr_img_width = lr_img_tensor.shape
 
         sr_img_height = lr_img_height * self.scaling_factor
         sr_img_width = lr_img_width * self.scaling_factor
-        sr_img_shape = (batch_size, channels, sr_img_height, sr_img_width)
+        sr_img_shape = (num_channels, sr_img_height, sr_img_width)
 
         sr_accumulated_values = torch.zeros(sr_img_shape, dtype=torch.float32, device="cpu")
         sr_weight_map = torch.zeros(sr_img_shape, dtype=torch.float32, device="cpu")
 
         stride = self.tile_size - self.tile_overlap
-
         height_steps = list(range(0, lr_img_height - self.tile_size, stride)) + [lr_img_height - self.tile_size]
         width_steps = list(range(0, lr_img_width - self.tile_size, stride)) + [lr_img_width - self.tile_size]
 
@@ -84,35 +83,35 @@ class Evaluator:
                 lr_height_start = max(0, lr_height_end - self.tile_size)
                 lr_width_start = max(0, lr_width_end - self.tile_size)
 
-                lr_img_patch = lr_img_tensor[:, :, lr_height_start:lr_height_end, lr_width_start:lr_width_end].to(
-                    self.device
-                )
+                lr_img_patch = lr_img_tensor[:, lr_height_start:lr_height_end, lr_width_start:lr_width_end]
+                lr_img_patch = lr_img_patch.to(self.device)
 
                 with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=True):
-                    sr_img_patch = self.model(lr_img_patch).cpu()
+                    sr_img_patch = self.model(lr_img_patch.unsqueeze(0)).squeeze(0).cpu()
 
                 sr_height_end = lr_height_end * self.scaling_factor
                 sr_width_end = lr_width_end * self.scaling_factor
                 sr_height_start = lr_height_start * self.scaling_factor
                 sr_width_start = lr_width_start * self.scaling_factor
 
-                sr_accumulated_values[:, :, sr_height_start:sr_height_end, sr_width_start:sr_width_end] += sr_img_patch
-                sr_weight_map[:, :, sr_height_start:sr_height_end, sr_width_start:sr_width_end] += 1.0
+                sr_accumulated_values[:, sr_height_start:sr_height_end, sr_width_start:sr_width_end] += sr_img_patch
+                sr_weight_map[:, sr_height_start:sr_height_end, sr_width_start:sr_width_end] += 1.0
 
         return sr_accumulated_values.div_(sr_weight_map)
 
     def _run_model(self, lr_img_tensor: Tensor) -> Tensor:
         window_size = self.config.get("model_params", {}).get("window_size", 16)
 
-        _, _, lr_img_height, lr_img_width = lr_img_tensor.shape
-        pad_right = (window_size - (lr_img_width % window_size)) % window_size
-        pad_bottom = (window_size - (lr_img_height % window_size)) % window_size
+        _, lr_img_height, lr_img_width = lr_img_tensor.shape
+        padding_right = (window_size - (lr_img_width % window_size)) % window_size
+        padding_bottom = (window_size - (lr_img_height % window_size)) % window_size
 
-        if pad_right > 0 or pad_bottom > 0:
-            lr_tensor_padded = F.pad(lr_img_tensor, (0, pad_right, 0, pad_bottom), mode="reflect")
+        if padding_right > 0 or padding_bottom > 0:
+            lr_tensor_padded = F.pad(lr_img_tensor, (0, padding_right, 0, padding_bottom), mode="reflect")
         else:
             lr_tensor_padded = lr_img_tensor
 
+        sr_tensor_padded = self.model(lr_tensor_padded.unsqueeze(0)).squeeze(0)
         oom_caught = False
         try:
             sr_tensor_padded = self.model(lr_tensor_padded)
@@ -127,9 +126,9 @@ class Evaluator:
             tqdm.write("\n[OOM Защита] Нехватка VRAM. Переход на тайлинг...")
             return self._run_model_tiled(lr_img_tensor)
 
-        if pad_right > 0 or pad_bottom > 0:
+        if padding_right > 0 or padding_bottom > 0:
             sr_img_tensor = sr_tensor_padded[
-                :, :, : lr_img_height * self.scaling_factor, : lr_img_width * self.scaling_factor
+                :, : lr_img_height * self.scaling_factor, : lr_img_width * self.scaling_factor
             ]
         else:
             sr_img_tensor = sr_tensor_padded
@@ -138,12 +137,12 @@ class Evaluator:
 
     def _preprocess_img(self, img_path: Path) -> Tensor:
         img_tensor = read_image(str(img_path), mode=ImageReadMode.RGB)
-        img_tensor = (img_tensor.float() / 255.0).unsqueeze(0)
+        img_tensor = img_tensor.float() / 255.0
 
         return img_tensor.to(self.device)
 
     def _save_img(self, img_tensor: Tensor, save_path: Path) -> None:
-        img_tensor = img_tensor.squeeze(0).cpu().clamp(0, 1)
+        img_tensor = img_tensor.cpu().clamp(0, 1)
         img_tensor = (img_tensor * 255.0).to(torch.uint8)
 
         save_path.parent.mkdir(exist_ok=True, parents=True)
@@ -173,18 +172,20 @@ class Evaluator:
         for batch in tqdm(
             dataloader, desc=f"Evaluating {self.model_name} on {dataset_name}", total=len(dataloader), leave=False
         ):
-            lr_img_tensor = batch["lr"].to(device=self.device, non_blocking=True)
-            hr_img_tensor = batch["hr"].to(device=self.device, non_blocking=True)
+            lr_img_tensor = batch["lr"][0].to(device=self.device, non_blocking=True)
+            hr_img_tensor = batch["hr"][0].to(device=self.device, non_blocking=True)
 
             sr_img_tensor = self._run_model(lr_img_tensor)
-            sr_img_tensor = sr_img_tensor.to(self.device).float().clamp(0, 1)
+            sr_img_tensor = sr_img_tensor.float().clamp(0, 1)
 
             scores["psnr"].append(calculate_psnr(sr_img_tensor, hr_img_tensor, crop_border=self.scaling_factor))
             scores["ssim"].append(calculate_ssim(sr_img_tensor, hr_img_tensor, crop_border=self.scaling_factor))
+            sr_img_batch = sr_img_tensor.unsqueeze(0)
+            hr_img_batch = hr_img_tensor.unsqueeze(0)
 
-            scores["lpips"].append(self.perceptual_metrics["lpips"](sr_img_tensor, hr_img_tensor).item())
-            scores["clipiqa"].append(self.perceptual_metrics["clipiqa"](sr_img_tensor).item())
-            scores["musiq"].append(self.perceptual_metrics["musiq"](sr_img_tensor).item())
+            scores["lpips"].append(self.perceptual_metrics["lpips"](sr_img_batch, hr_img_batch).item())
+            scores["clipiqa"].append(self.perceptual_metrics["clipiqa"](sr_img_batch).item())
+            scores["musiq"].append(self.perceptual_metrics["musiq"](sr_img_batch).item())
 
         return {
             "PSNR": float(np.mean(scores["psnr"])),
