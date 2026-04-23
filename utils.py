@@ -5,6 +5,8 @@ from einops import einsum, rearrange, repeat
 from torch import Tensor
 from torch.nn import functional as F
 
+from prepare_data import imresize
+
 
 def rgb2y(img_tensor: Tensor) -> Tensor:
     weights = torch.tensor(
@@ -184,3 +186,13 @@ def calculate_ssim(
         window_size=window_size,
         return_map=return_map,
     )
+
+
+def imresize_tensor(img_tensor: Tensor, scale: float, antialiasing: bool = True) -> Tensor:
+    device = img_tensor.device
+
+    img_np = img_tensor.cpu().clamp(0, 1).permute(1, 2, 0).numpy()
+    lr_np = imresize(img_np, scale=scale, antialiasing=antialiasing)
+    lr_tensor = torch.from_numpy(lr_np.copy()).permute(2, 0, 1).float()
+
+    return lr_tensor.to(device).clamp(0, 1)
