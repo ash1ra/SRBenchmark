@@ -18,7 +18,7 @@ from torchvision.io import ImageReadMode, read_image
 from tqdm import tqdm
 
 from dataset import BenchmarkDataset
-from utils import calculate_psnr, calculate_ssim
+from utils import calculate_psnr, calculate_ssim, imresize_tensor
 
 
 class Evaluator:
@@ -42,6 +42,7 @@ class Evaluator:
         self.prefetch_factor = prefetch_factor
 
         self._init_model(config_path)
+        self._init_perceptual_metrics()
 
     def _init_model(self, config_path: Path) -> None:
         self.model_name = config_path.parent.name
@@ -58,6 +59,18 @@ class Evaluator:
             self.model.load_state_dict(load_file(self.weights_path, device=str(self.device)))
 
         self.model.eval()
+
+    def _init_perceptual_metrics(self) -> None:
+        warnings.filterwarnings("ignore", category=UserWarning)
+
+        with redirect_stdout(io.StringIO()):
+            self.perceptual_metrics = {
+                "lpips": pyiqa.create_metric("lpips", as_loss=False, device=self.device),
+                "clipiqa": pyiqa.create_metric("clipiqa", as_loss=False, device=self.device),
+                "musiq": pyiqa.create_metric("musiq", as_loss=False, device=self.device),
+            }
+
+        warnings.filterwarnings("default", category=UserWarning)
 
     def _run_model_tiled(self, lr_img_tensor: Tensor) -> Tensor:
         assert self.tile_size is not None
@@ -178,6 +191,7 @@ class Evaluator:
 
             scores["psnr"].append(calculate_psnr(sr_img_tensor, hr_img_tensor, crop_border=self.scaling_factor))
             scores["ssim"].append(calculate_ssim(sr_img_tensor, hr_img_tensor, crop_border=self.scaling_factor))
+
             sr_img_batch = sr_img_tensor.unsqueeze(0)
             hr_img_batch = hr_img_tensor.unsqueeze(0)
 
@@ -195,17 +209,6 @@ class Evaluator:
 
     @torch.inference_mode()
     def evaluate(self, dataset_paths: list[Path]) -> dict[str, dict[str, float]]:
-        warnings.filterwarnings("ignore", category=UserWarning)
-
-        with redirect_stdout(io.StringIO()):
-            self.perceptual_metrics = {
-                "lpips": pyiqa.create_metric("lpips", as_loss=False, device=self.device),
-                "clipiqa": pyiqa.create_metric("clipiqa", as_loss=False, device=self.device),
-                "musiq": pyiqa.create_metric("musiq", as_loss=False, device=self.device),
-            }
-
-        warnings.filterwarnings("default", category=UserWarning)
-
         results = {}
 
         for dataset_path in dataset_paths:
@@ -222,17 +225,7 @@ class Evaluator:
     def upscale_downscaled(self, img_tensor: Tensor) -> Tensor:
         img_tensor = img_tensor.to(self.device)
 
-        _, img_height, img_width = img_tensor.shape
-
-        lr_img_height = img_height // self.scaling_factor
-        lr_img_width = img_width // self.scaling_factor
-
-        lr_img_tensor = F.interpolate(
-            img_tensor.unsqueeze(0),
-            size=(lr_img_height, lr_img_width),
-            mode="bicubic",
-            antialias=True,
-        ).clamp(0, 1)
+        lr_img_tensor = imresize_tensor(img_tensor, scale=1 / self.scaling_factor, antialiasing=True)
 
         return self._run_model(lr_img_tensor.squeeze(0))
 
