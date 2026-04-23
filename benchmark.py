@@ -3,8 +3,11 @@ from pathlib import Path
 from typing import Literal
 
 import torch
+import yaml
+from torch.nn import functional as F
 
 from evaluator import Evaluator
+from utils import imresize_tensor
 from visualizer import Visualizer
 
 
@@ -85,6 +88,62 @@ class Benchmark:
         gc.collect()
         torch.cuda.empty_cache()
 
+    def compare(
+        self,
+        config_paths: list[Path],
+        hr_img_path: Path,
+        output_img_path: Path,
+        lr_img_path: Path | None = None,
+        crop_size: int | None = None,
+    ) -> None:
+        hr_img_tensor = self.visualizer.read_image(hr_img_path)
+
+        _, hr_img_height, hr_img_width = hr_img_tensor.shape
+
+        if not lr_img_path:
+            with open(config_paths[0], "r", encoding="UTF-8") as f:
+                scaling_factor = yaml.safe_load(f)["model_params"]["scaling_factor"]
+
+            lr_img_tensor = imresize_tensor(hr_img_tensor, scale=1 / scaling_factor, antialiasing=True)
+        else:
+            lr_img_tensor = self.visualizer.read_image(lr_img_path)
+
+        results = {
+            "Bicubic": F.interpolate(
+                lr_img_tensor.unsqueeze(0),
+                size=(hr_img_height, hr_img_width),
+                mode="bicubic",
+            )
+            .squeeze(0)
+            .clamp(0, 1)
+        }
+
+        for config_path in config_paths:
+            evaluator = self._init_evaluator(config_path)
+            results[config_path.parent.name] = evaluator.upscale(lr_img_tensor)
+
+            del evaluator
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        results["Original (HR)"] = hr_img_tensor
+
+        if crop_size:
+            crop_center_coords = self.visualizer.get_crop_center(img_tensor=hr_img_tensor, crop_size=crop_size)
+
+            self.visualizer.create_collage_with_crop(
+                hr_img_tensor=hr_img_tensor,
+                sr_img_tensors_dict=results,
+                crop_center=crop_center_coords,
+                crop_size=crop_size,
+                output_img_path=output_img_path,
+            )
+        else:
+            self.visualizer.create_collage(
+                sr_img_tensors_dict=results,
+                output_img_path=output_img_path,
+            )
+
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -105,4 +164,18 @@ if __name__ == "__main__":
         input_img_path=Path("images/hr_img_1.jpg"),
         output_img_path=Path("results/hat_hr_img_1.png"),
         downscale=True,
+    )
+
+    benchmark.compare(
+        config_paths=models_to_test,
+        hr_img_path=Path("images/img_073.png"),
+        lr_img_path=Path("data/Urban100/LR_x4/img_073.png"),
+        output_img_path=Path("results/img_073_comparison.png"),
+        crop_size=64,
+    )
+
+    benchmark.compare(
+        config_paths=models_to_test,
+        hr_img_path=Path("images/hr_baboon.png"),
+        output_img_path=Path("results/baboon_comparison.png"),
     )
