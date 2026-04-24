@@ -18,7 +18,7 @@ from torchvision.io import ImageReadMode, read_image
 from tqdm import tqdm
 
 from dataset import BenchmarkDataset
-from utils import calculate_psnr, calculate_ssim, imresize_tensor
+from core_utils import calculate_psnr, calculate_ssim, imresize
 
 
 class Evaluator:
@@ -107,7 +107,7 @@ class Evaluator:
                 lr_img_patch = lr_img_patch.to(self.device)
 
                 pad = 16
-                lr_img_patch_padded = F.pad(lr_img_patch, (pad, pad, pad, pad), mode="reflect")
+                lr_img_patch_padded = F.pad(lr_img_patch, (pad, pad, pad, pad), mode="replicate")
 
                 sr_img_patch_padded = self.model(lr_img_patch_padded.unsqueeze(0)).squeeze(0).cpu()
 
@@ -138,7 +138,7 @@ class Evaluator:
         padding_bottom = (window_size - (lr_img_height % window_size)) % window_size
 
         if padding_right > 0 or padding_bottom > 0:
-            lr_tensor_padded = F.pad(lr_img_tensor, (0, padding_right, 0, padding_bottom), mode="reflect")
+            lr_tensor_padded = F.pad(lr_img_tensor, (0, padding_right, 0, padding_bottom), mode="replicate")
         else:
             lr_tensor_padded = lr_img_tensor
 
@@ -223,9 +223,7 @@ class Evaluator:
 
     @torch.inference_mode()
     def upscale_downscaled(self, img_tensor: Tensor) -> Tensor:
-        img_tensor = img_tensor.to(self.device)
-
-        lr_img_tensor = imresize_tensor(img_tensor, scale=1 / self.scaling_factor, antialiasing=True)
+        lr_img_tensor = imresize(img_tensor, scaling_factor=1 / self.scaling_factor, antialiasing=True).to(self.device)
 
         return self._run_model(lr_img_tensor.squeeze(0))
 
