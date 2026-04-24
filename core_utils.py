@@ -1,11 +1,23 @@
+from pathlib import Path
 from typing import Literal, Optional, overload
 
+import numpy as np
 import torch
 from einops import einsum, rearrange, repeat
 from torch import Tensor
 from torch.nn import functional as F
 
-from prepare_data import imresize
+
+def get_available_models(models_dir: Path) -> list[str]:
+    if not models_dir.exists() or not models_dir.is_dir():
+        return []
+
+    models = []
+    for item in models_dir.iterdir():
+        if item.is_dir() and (item / "config.yaml").exists():
+            models.append(item.name)
+
+    return sorted(models)
 
 
 def rgb2y(img_tensor: Tensor) -> Tensor:
@@ -188,11 +200,111 @@ def calculate_ssim(
     )
 
 
-def imresize_tensor(img_tensor: Tensor, scale: float, antialiasing: bool = True) -> Tensor:
-    device = img_tensor.device
+# Ported from BasicSR (matlab_functions.py) to ensure academic reproducibility.
+# Implements MATLAB-like bicubic interpolation required for standard SR benchmarks (Set5, Set14).
+# https://github.com/XPixelGroup/BasicSR/blob/master/basicsr/utils/matlab_functions.py
+
+
+def cubic(x: np.ndarray) -> np.ndarray:
+    abs_x = np.abs(x)
+    abs_x2 = abs_x**2
+    abs_x3 = abs_x**3
+
+    return (1.5 * abs_x3 - 2.5 * abs_x2 + 1) * ((abs_x <= 1).astype(type(abs_x))) + (
+        -0.5 * abs_x3 + 2.5 * abs_x2 - 4 * abs_x + 2
+    ) * (((abs_x > 1) * (abs_x <= 2)).astype(type(abs_x)))
+
+
+def calculate_weights_indices(
+    in_length: int,
+    out_length: int,
+    scaling_factor: float,
+    kernel_width: int,
+    antialiasing: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    if (scaling_factor < 1) and antialiasing:
+        kernel_width: int | float = kernel_width / scaling_factor
+
+    x = np.linspace(1, out_length, out_length)
+    u = x / scaling_factor + 0.5 * (1 - 1 / scaling_factor)
+    left = np.floor(u - kernel_width / 2)
+    p = int(np.ceil(kernel_width)) + 2
+
+    indices = left.reshape(int(out_length), 1) + np.linspace(0, p - 1, p).reshape(1, int(p))
+
+    distance_to_center = u.reshape(int(out_length), 1) - indices
+
+    if (scaling_factor < 1) and antialiasing:
+        weights = scaling_factor * cubic(distance_to_center * scaling_factor)
+    else:
+        weights = cubic(distance_to_center)
+
+    weights_sum = np.sum(weights, 1).reshape(int(out_length), 1)
+    weights /= weights_sum
+
+    weights_zero_idx = np.where(weights_sum == 0)
+    if len(weights_zero_idx[0]) > 0:
+        weights[weights_zero_idx, 0] = 1
+
+    padded_indices = indices.astype(int)
+    padded_indices -= 1
+
+    padded_indices = np.abs(padded_indices)
+    padded_indices = np.where(padded_indices < in_length, padded_indices, 2 * in_length - 1 - padded_indices)
+    padded_indices = np.clip(padded_indices, 0, in_length - 1)
+
+    return weights, padded_indices
+
+
+def imresize(img_tensor: Tensor, scaling_factor: float, antialiasing: bool = True) -> Tensor:
+    if scaling_factor == 1:
+        return img_tensor
 
     img_np = img_tensor.cpu().clamp(0, 1).permute(1, 2, 0).numpy()
-    lr_np = imresize(img_np, scale=scale, antialiasing=antialiasing)
-    lr_tensor = torch.from_numpy(lr_np.copy()).permute(2, 0, 1).float()
 
-    return lr_tensor.to(device).clamp(0, 1)
+    if len(img_np.shape) == 3:
+        input_img_height, input_img_width, input_img_num_channels = img_np.shape
+    else:
+        input_img_height, input_img_width = img_np.shape
+        input_img_num_channels = 1
+
+    output_img_height = int(np.ceil(input_img_height * scaling_factor))
+    output_img_width = int(np.ceil(input_img_width * scaling_factor))
+
+    kernel_width = 4
+
+    height_weights, height_indices = calculate_weights_indices(
+        in_length=input_img_height,
+        out_length=output_img_height,
+        scaling_factor=scaling_factor,
+        kernel_width=kernel_width,
+        antialiasing=antialiasing,
+    )
+
+    width_weights, width_indices = calculate_weights_indices(
+        in_length=input_img_width,
+        out_length=output_img_width,
+        scaling_factor=scaling_factor,
+        kernel_width=kernel_width,
+        antialiasing=antialiasing,
+    )
+
+    img_aug = np.zeros((output_img_height, input_img_width, input_img_num_channels), dtype=np.float32)
+
+    for channel in range(input_img_num_channels):
+        channel_data = img_np[:, :, channel] if input_img_num_channels > 1 else img_np
+        pixels = channel_data[height_indices]
+        img_aug[:, :, channel] = np.sum(height_weights[:, :, None] * pixels, axis=1)
+
+    output_img = np.zeros((output_img_height, output_img_width, input_img_num_channels), dtype=np.float32)
+
+    for channel in range(input_img_num_channels):
+        channel_data = img_aug[:, :, channel]
+        pixels = channel_data[:, width_indices]
+        output_img[:, :, channel] = np.sum(width_weights[None, :, :] * pixels, axis=2)
+
+    output_img *= 255.0
+    output_img = np.round(np.clip(output_img, 0.0, 255.0)).astype(np.uint8)
+    output_img = output_img.astype(np.float32) / 255.0
+
+    return torch.from_numpy(output_img.copy()).permute(2, 0, 1).float()
