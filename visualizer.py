@@ -1,6 +1,12 @@
 import math
+from os import environ
 from pathlib import Path
 from typing import Any, TypedDict
+
+environ["QT_LOGGING_RULES"] = "*=false"
+environ["QT_QPA_PLATFORM"] = "xcb"
+environ["QT_DEVICE_PIXEL_RATIO"] = "0"
+environ["OPENCV_LOG_LEVEL"] = "ERROR"
 
 import cv2
 import numpy as np
@@ -35,7 +41,7 @@ class Visualizer:
         return img_tensor.float() / 255.0
 
     def print_results_table(self, model_name: str, results: dict[str, dict[str, float]]) -> None:
-        print(f"\n{'=' * 82}")
+        print(f"{'=' * 82}")
         print(f"{'Benchmark: ' + model_name:^82}")
         print(f"{'-' * 82}")
         print(
@@ -226,9 +232,17 @@ class Visualizer:
 
         img_width, img_height = imgs[0].size
         header_height = 60
+        num_imgs = len(imgs)
 
-        canvas_width = img_width * len(imgs)
-        canvas_height = img_height + header_height
+        if num_imgs > 2 and num_imgs % 2 == 0:
+            rows = 2
+            cols = num_imgs // 2
+        else:
+            rows = 1
+            cols = num_imgs
+
+        canvas_width = img_width * cols
+        canvas_height = (img_height + header_height) * rows
 
         canvas = Image.new("RGB", (canvas_width, canvas_height), (240, 240, 240))
         draw = ImageDraw.Draw(canvas)
@@ -239,15 +253,20 @@ class Visualizer:
             font = ImageFont.load_default()
 
         for i, (img, label) in enumerate(zip(imgs, labels)):
-            x_offset = i * img_width
+            row = i // cols
+            column = i % cols
+
+            x_offset = column * img_width
+            y_offset = row * (img_height + header_height)
 
             bbox = draw.textbbox((0, 0), label, font=font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            text_x = x_offset + (img_width - text_width) // 2
-            text_y = img_height + (header_height - text_height) // 2 - 7
 
-            canvas.paste(img, (x_offset, 0))
+            text_x = x_offset + (img_width - text_width) // 2
+            text_y = y_offset + img_height + (header_height - text_height) // 2 - 7
+
+            canvas.paste(img, (x_offset, y_offset))
             draw.text((text_x, text_y), label, fill=(40, 40, 40), font=font)
 
         output_img_path.parent.mkdir(exist_ok=True, parents=True)
