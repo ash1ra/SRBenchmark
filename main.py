@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import torch
+import yaml
 
 from benchmark import Benchmark
 from core_utils import get_available_models
@@ -43,9 +44,16 @@ def main() -> None:
 
     parser.add_argument(
         "task",
-        nargs="+",
+        nargs="*",
         choices=["benchmark", "upscale", "compare"],
         help="Tasks to perform. Multiple tasks can be specified separated by spaces.",
+    )
+
+    parser.add_argument(
+        "-c",
+        "--config",
+        type=Path,
+        help="Path to a YAML configuration file to run tasks",
     )
 
     parser.add_argument(
@@ -91,7 +99,9 @@ def main() -> None:
 
     parser.add_argument(
         "--crop-size",
+        nargs="+",
         type=int,
+        default=64,
         help="Crop size for creating collages in 'compare' task",
     )
 
@@ -130,6 +140,41 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if args.config:
+        if not args.config.exists():
+            logger.error(f"Configuration file '{args.config}' not found.")
+            return
+
+        with open(args.config, "r", encoding="utf-8") as f:
+            yaml_config = yaml.safe_load(f)
+
+        if "task" in yaml_config:
+            args.task = yaml_config["task"]
+        if "models" in yaml_config:
+            args.models = yaml_config["models"]
+        if "datasets" in yaml_config:
+            args.datasets = [Path(p) for p in yaml_config["datasets"]]
+        if "input" in yaml_config:
+            args.input = [Path(p) for p in yaml_config["input"]]
+        if "output" in yaml_config:
+            args.output = [Path(p) for p in yaml_config["output"]]
+        if "lr_input" in yaml_config:
+            args.lr_input = [Path(p) if str(p).lower() != "none" else None for p in yaml_config["lr_input"]]
+        if "crop_size" in yaml_config:
+            args.crop_size = yaml_config["crop_size"]
+        if "downscale" in yaml_config:
+            args.downscale = yaml_config["downscale"]
+
+    if args.crop_size is not None:
+        if isinstance(args.crop_size, list):
+            if len(args.crop_size) == 1:
+                args.crop_size = args.crop_size[0]
+            elif len(args.crop_size) >= 2:
+                args.crop_size = (args.crop_size[0], args.crop_size[1])
+
+    if not args.task:
+        parser.error("No tasks specified. Provide tasks via CLI or a YAML config file.")
 
     log_environment_info(args, device)
 
