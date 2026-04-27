@@ -153,7 +153,7 @@ class Visualizer:
         hr_img_tensor: Tensor,
         sr_img_tensors_dict: dict[str, Tensor],
         crop_center: tuple[int, int],
-        crop_size: int,
+        crop_size: int | tuple[int, int],
         output_img_path: Path,
     ) -> None:
         to_pil = transforms.ToPILImage()
@@ -161,10 +161,17 @@ class Visualizer:
         hr_img = to_pil(hr_img_tensor.cpu().clamp(0, 1))
         draw_hr = ImageDraw.Draw(hr_img)
 
+        if isinstance(crop_size, int):
+            crop_width, crop_height = crop_size, crop_size
+        else:
+            crop_width, crop_height = crop_size
+
         center_x, center_y = crop_center
-        half_crop_size = crop_size // 2
-        x1, y1 = center_x - half_crop_size, center_y - half_crop_size
-        x2, y2 = center_x + half_crop_size, center_y + half_crop_size
+        half_width = crop_width // 2
+        half_height = crop_height // 2
+
+        x1, y1 = center_x - half_width, center_y - half_height
+        x2, y2 = center_x + half_width, center_y + half_height
 
         line_width = max(3, hr_img.width // 300)
         draw_hr.rectangle([x1, y1, x2, y2], outline="red", width=line_width)

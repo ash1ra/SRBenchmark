@@ -99,7 +99,7 @@ class Benchmark:
         hr_img_paths: list[Path],
         output_img_paths: list[Path],
         lr_img_paths: list[Path | None] | None = None,
-        crop_size: int | None = None,
+        crop_size: int | tuple[int, int] | None = None,
     ) -> None:
         hr_img_tensors = [self.visualizer.read_image(path) for path in hr_img_paths]
         lr_img_tensors = []
