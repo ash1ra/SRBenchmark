@@ -17,6 +17,8 @@ from PIL import Image, ImageDraw, ImageFont
 from torch import Tensor
 from torchvision.io import ImageReadMode, read_image, write_png
 
+from logger import logger
+
 
 class CropSelectionParams(TypedDict):
     img_bgr: np.ndarray
@@ -41,24 +43,24 @@ class Visualizer:
         return img_tensor.float() / 255.0
 
     def print_results_table(self, model_name: str, results: dict[str, dict[str, float]]) -> None:
-        print(f"{'=' * 82}")
-        print(f"{'Benchmark: ' + model_name:^82}")
-        print(f"{'-' * 82}")
-        print(
-            f"{'Dataset':<15} | {'PSNR (↑)':<10} | {'SSIM (↑)':<10} | {'LPIPS (↓)':<10} | {'CLIPIQA (↑)':<11} | {'MUSIQ (↑)':<10}"
-        )
-        print(f"{'-' * 82}")
+        table_str = f"\n{'=' * 82}\n"
+        table_str += f"{'Benchmark: ' + model_name:^82}\n"
+        table_str += f"{'-' * 82}\n"
+        table_str += f"{'Dataset':<15} | {'PSNR (↑)':<10} | {'SSIM (↑)':<10} | {'LPIPS (↓)':<10} | {'CLIPIQA (↑)':<11} | {'MUSIQ (↑)':<10}\n"
+        table_str += f"{'-' * 82}\n"
 
         for dataset_name, metrics in results.items():
-            print(
+            table_str += (
                 f"{dataset_name:<15} | "
                 f"{metrics['PSNR']:>10.2f} | "
                 f"{metrics['SSIM']:>10.4f} | "
                 f"{metrics['LPIPS']:>10.4f} | "
                 f"{metrics['CLIPIQA']:>11.4f} | "
-                f"{metrics['MUSIQ']:>10.2f}"
+                f"{metrics['MUSIQ']:>10.2f}\n"
             )
-        print(f"{'=' * 82}\n")
+        table_str += f"{'=' * 82}"
+
+        logger.info(table_str)
 
     def save_benchmark_csv(
         self,
@@ -75,7 +77,7 @@ class Visualizer:
         df = pd.DataFrame(flat_data)
         Path(output_img_path).parent.mkdir(exist_ok=True, parents=True)
         df.to_csv(output_img_path, index=False, float_format="%.4f")
-        print(f"✅ Table with results saved to {output_img_path}")
+        logger.info(f"Table with results saved to '{output_img_path}'")
 
     def _draw_crop_preview(self) -> None:
         img = self.crop_selection_params["img_bgr"].copy()
@@ -220,7 +222,7 @@ class Visualizer:
 
         output_img_path.parent.mkdir(exist_ok=True, parents=True)
         canvas.save(output_img_path)
-        print(f"Collage saved to {output_img_path}")
+        logger.info(f"Collage saved to '{output_img_path}'")
 
     def create_collage(self, sr_img_tensors_dict: dict[str, Tensor], output_img_path: Path) -> None:
         imgs = []
@@ -271,4 +273,4 @@ class Visualizer:
 
         output_img_path.parent.mkdir(exist_ok=True, parents=True)
         canvas.save(output_img_path)
-        print(f"Comparison collage saved to {output_img_path}")
+        logger.info(f"Comparison collage saved to '{output_img_path}'")

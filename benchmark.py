@@ -7,6 +7,7 @@ import yaml
 from torch.nn import functional as F
 
 from evaluator import Evaluator
+from logger import logger
 from core_utils import imresize
 from visualizer import Visualizer
 
@@ -52,7 +53,7 @@ class Benchmark:
             evaluator = self._init_evaluator(config_path)
             model_name = evaluator.model_name
 
-            print(f"\n[{model_name}] | Starting benchmark...")
+            logger.info(f"[{model_name}] | Starting benchmark...")
 
             model_results = evaluator.evaluate(dataset_paths)
             results[model_name] = model_results
@@ -159,40 +160,3 @@ class Benchmark:
                     sr_img_tensors_dict=results[i],
                     output_img_path=output_img_paths[i],
                 )
-
-
-if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    benchmark = Benchmark(device=device)
-
-    models_to_test = list(Path("models").glob("*/config.yaml"))
-    datasets = [Path("data/Set5"), Path("data/Set14")]
-
-    # benchmark.evaluate(
-    #     config_paths=models_to_test,
-    #     dataset_paths=datasets,
-    #     save_csv_path=Path("results/final_benchmark.csv"),
-    # )
-
-    # benchmark.upscale(
-    #     config_paths=models_to_test,
-    #     input_img_paths=[Path("images/hr_img_1.jpg")],
-    #     output_img_paths=[Path("results/sr_img_1.png")],
-    #     downscale=True,
-    # )
-
-    # benchmark.compare(
-    #     config_paths=models_to_test,
-    #     hr_img_path=Path("data/Urban100/HR/img_071.png"),
-    #     lr_img_path=Path("data/Urban100/LR_x4/img_071.png"),
-    #     output_img_path=Path("results/img_071_comparison.png"),
-    #     crop_size=64,
-    # )
-
-    benchmark.compare(
-        config_paths=models_to_test,
-        hr_img_paths=[Path("data/Set14/HR/flowers.png"), Path("./data/Manga109/HR/HealingPlanet.png")],
-        lr_img_paths=[Path("data/Set14/LR_x4/flowers.png"), None],
-        output_img_paths=[Path("results/flowers_comparison.png"), Path("results/manga_comparison.png")],
-    )

@@ -5,6 +5,7 @@ import torch
 
 from benchmark import Benchmark
 from core_utils import get_available_models
+from logger import logger
 
 
 def main() -> None:
@@ -109,12 +110,12 @@ def main() -> None:
     args = parser.parse_args()
 
     if not models:
-        print("❌ Error: No models with config.yaml found in 'models/' directory.")
+        logger.error("No models with config.yaml found in 'models/' directory.")
         return
 
     selected_models = models if "all" in args.models else args.models
     config_paths = [models_dir / model / "config.yaml" for model in selected_models]
-    print(f"Loaded models: {', '.join(selected_models)}")
+    logger.info(f"Loaded models: {', '.join(selected_models)}")
 
     benchmark_app = Benchmark(
         device=device,
@@ -129,21 +130,21 @@ def main() -> None:
             parser.error("The --datasets argument is required for 'benchmark' task")
 
         save_csv_path = args.output[0] if args.output else Path("results/benchmark.csv")
-        print(f"\n🚀 Starting benchmark on datasets: {[d.name for d in args.datasets]}")
+        logger.info(f"Starting benchmark on datasets: {[d.name for d in args.datasets]}")
         benchmark_app.evaluate(config_paths, args.datasets, save_csv_path)
 
     if "upscale" in args.task:
         if not args.input or not args.output:
             parser.error("The --input and --output arguments are required for 'upscale' task")
 
-        print("\n🚀 Starting upscale...")
+        logger.info("Starting upscale...")
         benchmark_app.upscale(config_paths, args.input, args.output, args.downscale)
 
     if "compare" in args.task:
         if not args.input or not args.output:
             parser.error("The --input (HR) and --output arguments are required for 'compare' task")
 
-        print("\n🚀 Starting model comparison...")
+        logger.info("Starting model comparison...")
         benchmark_app.compare(config_paths, args.input, args.output, args.lr_input, args.crop_size)
 
 

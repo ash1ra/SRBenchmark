@@ -4,6 +4,8 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.io import ImageReadMode, read_image
 
+from logger import logger
+
 
 class BenchmarkDataset(Dataset):
     def __init__(self, dataset_path: Path, scaling_factor: int) -> None:
@@ -26,10 +28,10 @@ class BenchmarkDataset(Dataset):
                 f"[Data] No matching files found between '{self.hr_dir_path}' and '{self.lr_dir_path}'"
             )
 
-        if len(hr_img_names) != len(lr_img_names):
-            print(
-                f"[Data] Count mismatch! HR: {len(hr_img_names)}, LR: {len(lr_img_names)}. "
-                f"Proceeding with {len(self.img_names)} common files."
+        if len(hr_files) != len(lr_files):
+            logger.warning(
+                f"[Data] Count mismatch! HR: {len(hr_files)}, LR: {len(lr_files)}. "
+                f"Proceeding with {len(self.common_stems)} common files."
             )
 
     def __len__(self) -> int:
