@@ -107,7 +107,10 @@ class Evaluator:
                 pad = 16
                 lr_img_patch_padded = F.pad(lr_img_patch, (pad, pad, pad, pad), mode="replicate")
 
-                sr_img_patch_padded = self.model(lr_img_patch_padded.unsqueeze(0)).squeeze(0).cpu()
+                with torch.autocast(device_type=self.device.type):
+                    sr_img_patch_padded = self.model(lr_img_patch_padded.unsqueeze(0)).squeeze(0).cpu()
+
+                sr_img_patch_padded = sr_img_patch_padded.float()
 
                 sr_pad = pad * self.scaling_factor
                 sr_img_patch = sr_img_patch_padded[:, sr_pad:-sr_pad, sr_pad:-sr_pad]
@@ -140,7 +143,10 @@ class Evaluator:
         else:
             lr_tensor_padded = lr_img_tensor
 
-        sr_tensor_padded = self.model(lr_tensor_padded.unsqueeze(0)).squeeze(0)
+        with torch.autocast(device_type=self.device.type):
+            sr_tensor_padded = self.model(lr_tensor_padded.unsqueeze(0)).squeeze(0)
+
+        sr_tensor_padded = sr_tensor_padded.float()
 
         if padding_right > 0 or padding_bottom > 0:
             sr_img_tensor = sr_tensor_padded[
