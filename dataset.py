@@ -18,12 +18,12 @@ class BenchmarkDataset(Dataset):
             raise FileNotFoundError(f"[Data] Datasets directories not found in '{dataset_path}'")
 
         valid_exts = {".png", ".jpg", ".jpeg"}
-        hr_img_names = {p.name for p in self.hr_dir_path.iterdir() if p.suffix.lower() in valid_exts}
-        lr_img_names = {p.name for p in self.lr_dir_path.iterdir() if p.suffix.lower() in valid_exts}
+        hr_files = {p.stem: p for p in self.hr_dir_path.iterdir() if p.suffix.lower() in valid_exts}
+        lr_files = {p.stem: p for p in self.lr_dir_path.iterdir() if p.suffix.lower() in valid_exts}
 
-        self.img_names = sorted(list(hr_img_names & lr_img_names))
+        self.common_stems = sorted(list(set(hr_files.keys()) & set(lr_files.keys())))
 
-        if not self.img_names:
+        if not self.common_stems:
             raise FileNotFoundError(
                 f"[Data] No matching files found between '{self.hr_dir_path}' and '{self.lr_dir_path}'"
             )
@@ -34,23 +34,21 @@ class BenchmarkDataset(Dataset):
                 f"Proceeding with {len(self.common_stems)} common files."
             )
 
+        self.hr_paths = [hr_files[stem] for stem in self.common_stems]
+        self.lr_paths = [lr_files[stem] for stem in self.common_stems]
+
     def __len__(self) -> int:
-        return len(self.img_names)
+        return len(self.hr_paths)
 
     def __getitem__(self, index: int) -> dict[str, Tensor | str]:
-        img_name = self.img_names[index]
+        hr_img_path = self.hr_paths[index]
+        lr_img_path = self.lr_paths[index]
 
-        hr_img_path = self.hr_dir_path / img_name
-        lr_img_path = self.lr_dir_path / img_name
-
-        hr_img_tensor = read_image(str(hr_img_path), mode=ImageReadMode.RGB)
-        lr_img_tensor = read_image(str(lr_img_path), mode=ImageReadMode.RGB)
-
-        hr_img_tensor = hr_img_tensor.float() / 255.0
-        lr_img_tensor = lr_img_tensor.float() / 255.0
+        hr_img_tensor = (read_image(str(hr_img_path), mode=ImageReadMode.RGB)).float() / 255.0
+        lr_img_tensor = (read_image(str(lr_img_path), mode=ImageReadMode.RGB)).float() / 255.0
 
         return {
             "hr": hr_img_tensor,
             "lr": lr_img_tensor,
-            "name": Path(img_name).stem,
+            "name": self.common_stems[index],
         }
