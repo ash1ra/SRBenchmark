@@ -1,4 +1,6 @@
 import argparse
+import platform
+import sys
 from pathlib import Path
 
 import torch
@@ -6,6 +8,26 @@ import torch
 from benchmark import Benchmark
 from core_utils import get_available_models
 from logger import logger
+
+
+def log_environment_info(args: argparse.Namespace, device: str) -> None:
+    logger.debug("=" * 50)
+    logger.debug("SRBenchmark Launch Info")
+    logger.debug("=" * 50)
+    logger.debug(f"OS: {platform.system()} {platform.release()}")
+    logger.debug(f"Python: {platform.python_version()}")
+    logger.debug(f"PyTorch: {torch.__version__}")
+    logger.debug(f"Device: {device}")
+
+    if device == "cuda" and torch.cuda.is_available():
+        logger.debug(f"GPU: {torch.cuda.get_device_name(0)}")
+
+    logger.debug("Arguments:")
+    for key, value in vars(args).items():
+        if value is not None:
+            logger.debug(f"   {key}: {value}")
+
+    logger.debug("=" * 50)
 
 
 def main() -> None:
@@ -108,6 +130,8 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    log_environment_info(args, device)
 
     if not models:
         logger.error("No models with config.yaml found in 'models/' directory.")
