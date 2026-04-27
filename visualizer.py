@@ -32,6 +32,9 @@ class CropSelectionParams(TypedDict):
 
 
 class Visualizer:
+    def __init__(self) -> None:
+        self.crop_selection_params: CropSelectionParams | None = None
+
     def save_image(self, img_tensor: Tensor, save_path: Path) -> None:
         img_tensor = img_tensor.cpu().clamp(0, 1)
         img_tensor = (img_tensor * 255.0).to(torch.uint8)
@@ -80,6 +83,9 @@ class Visualizer:
         logger.info(f"Table with results saved to '{output_img_path}'")
 
     def _draw_crop_preview(self) -> None:
+        if self.crop_selection_params is None:
+            raise ValueError("self.crop_selection_params is None")
+
         img = self.crop_selection_params["img_bgr"].copy()
 
         center_x = self.crop_selection_params["center_x"]
@@ -98,6 +104,9 @@ class Visualizer:
         cv2.imshow(self.crop_selection_params["window_name"], img)
 
     def _mouse_callback(self, event: int, x: int, y: int, _flags: int, _param: Any) -> None:
+        if self.crop_selection_params is None:
+            raise ValueError("self.crop_selection_params is None")
+
         if event == cv2.EVENT_LBUTTONDOWN:
             crop_width = self.crop_selection_params["crop_width"]
             crop_height = self.crop_selection_params["crop_height"]
@@ -144,7 +153,7 @@ class Visualizer:
 
         result = (self.crop_selection_params["center_x"], self.crop_selection_params["center_y"])
 
-        del self.crop_selection_params
+        self.crop_selection_params = None
 
         return result
 
