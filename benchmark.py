@@ -100,10 +100,18 @@ class Benchmark:
         lr_img_paths: list[Path | None] | None = None,
         crop_size: int | tuple[int, int] | None = None,
     ) -> None:
+        scaling_factors = [ModelConfig.from_yaml(path).scaling_factor for path in config_paths]
+
+        if len(set(scaling_factors)) > 1:
+            raise ValueError(
+                f"Cannot compare models with different scaling factors in a single run! "
+                f"Found factors: {scaling_factors}"
+            )
+
+        scaling_factor = scaling_factors[0]
+
         hr_img_tensors = [self.visualizer.read_image(path) for path in hr_img_paths]
         lr_img_tensors = []
-
-        scaling_factor = ModelConfig.from_yaml(config_paths[0]).scaling_factor
 
         for i, hr_img_tensor in enumerate(hr_img_tensors):
             lr_img_path = lr_img_paths[i] if lr_img_paths else None
