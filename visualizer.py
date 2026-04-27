@@ -9,6 +9,8 @@ environ["QT_DEVICE_PIXEL_RATIO"] = "0"
 environ["OPENCV_LOG_LEVEL"] = "ERROR"
 
 import cv2
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -45,42 +47,114 @@ class Visualizer:
         img_tensor = read_image(str(img_path), mode=ImageReadMode.RGB)
         return img_tensor.float() / 255.0
 
-    def print_results_table(self, model_name: str, results: dict[str, dict[str, float]]) -> None:
-        table_str = f"\n{'=' * 82}\n"
-        table_str += f"{'Benchmark: ' + model_name:^82}\n"
-        table_str += f"{'-' * 82}\n"
-        table_str += f"{'Dataset':<15} | {'PSNR (↑)':<10} | {'SSIM (↑)':<10} | {'LPIPS (↓)':<10} | {'CLIPIQA (↑)':<11} | {'MUSIQ (↑)':<10}\n"
-        table_str += f"{'-' * 82}\n"
+    def print_comparative_table(self, results: dict[str, dict[str, dict[str, float]]]) -> None:
+        models = list(results.keys())
+        if not models:
+            return
+        datasets = list(results[models[0]].keys())
 
-        for dataset_name, metrics in results.items():
-            table_str += (
-                f"{dataset_name:<15} | "
-                f"{metrics['PSNR']:>10.2f} | "
-                f"{metrics['SSIM']:>10.4f} | "
-                f"{metrics['LPIPS']:>10.4f} | "
-                f"{metrics['CLIPIQA']:>11.4f} | "
-                f"{metrics['MUSIQ']:>10.2f}\n"
-            )
-        table_str += f"{'=' * 82}"
+        metrics = ["Params (M)", "FLOPs (G)", "Time", "PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]
+
+        directions = {
+            "Params (M)": False,
+            "FLOPs (G)": False,
+            "Time": False,
+            "PSNR": True,
+            "SSIM": True,
+            "LPIPS": False,
+            "CLIPIQA": True,
+            "MUSIQ": True,
+        }
+
+        headers = [
+            "Params (M) (↓)",
+            "FLOPs (G) (↓)",
+            "Time (↓)",
+            "PSNR (↑)",
+            "SSIM (↑)",
+            "LPIPS (↓)",
+            "CLIPIQA(↑)",
+            "MUSIQ (↑)",
+        ]
+
+        table_width = 135
+        table_str = f"\n{'=' * table_width}\n"
+        table_str += f"{'Comparative Benchmark Results':^{table_width}}\n"
+        table_str += f"{'=' * table_width}\n"
+
+        for dataset in datasets:
+            table_str += f"Dataset: {dataset}\n"
+            table_str += f"{'-' * table_width}\n"
+
+            header_str = f"{'Model':<15} |"
+            for h in headers:
+                header_str += f" {h:>11} |"
+            table_str += header_str[:-1] + "\n"
+            table_str += f"{'-' * table_width}\n"
+
+            top_markers = {metric: {} for metric in metrics}
+            for metric in metrics:
+                model_vals = {model: results[model][dataset].get(metric, 0.0) for model in models}
+                valid_vals = [v for v in model_vals.values() if v > 0.0] or [0.0]
+
+                sorted_vals = sorted(list(set(valid_vals)), reverse=directions[metric])
+                top1 = sorted_vals[0] if len(sorted_vals) > 0 else None
+                top2 = sorted_vals[1] if len(sorted_vals) > 1 else None
+
+                for model, val in model_vals.items():
+                    if val == 0.0 and metric in ["Params (M)", "FLOPs (G)"]:
+                        top_markers[metric][model] = ""
+                    elif val == top1:
+                        top_markers[metric][model] = "(1)"
+                    elif val == top2:
+                        top_markers[metric][model] = "(2)"
+                    else:
+                        top_markers[metric][model] = ""
+
+            for model in models:
+                row_str = f"{model:<15} |"
+                for metric in metrics:
+                    val = results[model][dataset].get(metric, 0.0)
+                    marker = top_markers[metric][model]
+
+                    if metric in ["Params (M)", "FLOPs (G)"]:
+                        val_str = f"{val:.2f}"
+                    elif metric == "Time":
+                        val_str = f"{val:.3f}"
+                    elif metric in ["PSNR", "MUSIQ"]:
+                        val_str = f"{val:.2f}"
+                    else:
+                        val_str = f"{val:.4f}"
+
+                    cell = f"{val_str}{marker}"
+                    row_str += f" {cell:>11} |"
+                table_str += row_str[:-1] + "\n"
+            table_str += f"{'=' * table_width}\n"
 
         logger.info(table_str)
 
     def save_benchmark_csv(
         self,
         results: dict[str, dict[str, dict[str, float]]],
-        output_img_path: Path | str,
+        output_img_path: Path,
     ) -> None:
         flat_data = []
+        metrics_order = ["Params (M)", "FLOPs (G)", "Time", "PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]
+
         for model_name, datasets in results.items():
             for dataset_name, metrics in datasets.items():
                 row = {"Model": model_name, "Dataset": dataset_name}
-                row.update(metrics)  # type: ignore
+                for metric in metrics_order:
+                    if metric in metrics:
+                        row[metric] = metrics[metric]  # type: ignore
                 flat_data.append(row)
 
-        df = pd.DataFrame(flat_data)
         Path(output_img_path).parent.mkdir(exist_ok=True, parents=True)
-        df.to_csv(output_img_path, index=False, float_format="%.4f")
-        logger.info(f"Table with results saved to '{output_img_path}'")
+
+        df = pd.DataFrame(flat_data)
+        df.to_csv(output_img_path / "benchmark.csv", index=False, float_format="%.4f")
+
+        logger.info(f"Table with results saved to {output_img_path}")
 
     def _draw_crop_preview(self) -> None:
         if self.crop_selection_params is None:
@@ -290,3 +364,134 @@ class Visualizer:
         output_img_path.parent.mkdir(exist_ok=True, parents=True)
         canvas.save(output_img_path)
         logger.info(f"Comparison collage saved to '{output_img_path}'")
+
+    def generate_plots(self, results: dict[str, dict[str, dict[str, float]]], output_dir: Path) -> None:
+        models = list(results.keys())
+        if not models:
+            return
+
+        datasets = list(results[models[0]].keys())
+        output_dir.mkdir(exist_ok=True, parents=True)
+
+        avg_metrics = {model: {} for model in models}
+        metrics_list = ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ", "Time", "Params (M)", "MACs (G)"]
+
+        for model in models:
+            for metric in metrics_list:
+                vals = [
+                    results[model][dataset].get(metric, 0.0)
+                    for dataset in datasets
+                    if results[model][dataset].get(metric, 0.0) > 0.0
+                ]
+                avg_metrics[model][metric] = sum(vals) / len(vals) if vals else 0.0
+
+        colors = cm.get_cmap("tab10")(np.linspace(0, 1, len(models)))
+
+        self._plot_scatter_tradeoff(models, avg_metrics, colors, output_dir)
+        self._plot_radar_balance(models, avg_metrics, colors, output_dir)
+        self._plot_grouped_bar_stability(models, datasets, results, colors, output_dir)
+
+    def _plot_scatter_tradeoff(
+        self,
+        models: list[str],
+        avg_metrics: dict,
+        colors: np.ndarray,
+        output_dir: Path,
+    ) -> None:
+        plt.figure(figsize=(10, 6))
+
+        for i, model in enumerate(models):
+            x = avg_metrics[model].get("Time", 0.0)
+            y = avg_metrics[model].get("PSNR", 0.0)
+            s = avg_metrics[model].get("Params (M)", 0.0) * 15 + 50
+
+            if x > 0 and y > 0:
+                plt.scatter(x, y, s=s, color=colors[i], label=model, alpha=0.7, edgecolors="black", linewidth=1)
+                plt.annotate(model, (x, y), xytext=(8, 0), textcoords="offset points", va="center", fontsize=10)
+
+        plt.xlabel("Inference Time per Image (seconds) ↓", fontsize=12)
+        plt.ylabel("Average PSNR ↑", fontsize=12)
+        plt.title("Trade-off: Speed vs Quality\n(Bubble size represents Model Parameters in Millions)", fontsize=14)
+        plt.grid(True, linestyle="--", alpha=0.6)
+
+        plot_path = output_dir / "plot_1_scatter_tradeoff.png"
+        plt.savefig(plot_path, bbox_inches="tight", dpi=300)
+        plt.close()
+        logger.info(f"Scatter plot saved to '{plot_path}'")
+
+    def _plot_radar_balance(self, models: list[str], avg_metrics: dict, colors: np.ndarray, output_dir: Path) -> None:
+        radar_metrics = ["PSNR", "SSIM", "CLIPIQA", "MUSIQ", "LPIPS"]
+        min_max = {}
+
+        for metric in radar_metrics:
+            vals = [avg_metrics[model][metric] for model in models if avg_metrics[model][metric] > 0]
+            if vals:
+                min_max[metric] = {"min": min(vals), "max": max(vals)}
+            else:
+                min_max[metric] = {"min": 0, "max": 1}
+
+        angles = [n / float(len(radar_metrics)) * 2 * math.pi for n in range(len(radar_metrics))]
+        angles += angles[:1]
+
+        _, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+        plt.xticks(angles[:-1], radar_metrics, size=11)
+        ax.set_yticklabels([])
+
+        for i, model in enumerate(models):
+            values = []
+            for metric in radar_metrics:
+                val = avg_metrics[model].get(metric, 0.0)
+                mn, mx = min_max[metric]["min"], min_max[metric]["max"]
+
+                norm_val = 1.0 if mx == mn else (val - mn) / (mx - mn)
+                if metric == "LPIPS":
+                    norm_val = 1.0 - norm_val
+
+                values.append(0.1 + norm_val * 0.9)
+
+            values += values[:1]
+            ax.plot(angles, values, linewidth=2, linestyle="solid", label=model, color=colors[i])
+            ax.fill(angles, values, color=colors[i], alpha=0.1)
+
+        plt.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
+        plt.title("Model Perception-Distortion Balance\n(Further from center = Better)", size=14, y=1.1)
+
+        plot_path = output_dir / "plot_2_radar_balance.png"
+        plt.savefig(plot_path, bbox_inches="tight", dpi=300)
+        plt.close()
+        logger.info(f"Radar chart saved to '{plot_path}'")
+
+    def _plot_grouped_bar_stability(
+        self,
+        models: list[str],
+        datasets: list[str],
+        results: dict,
+        colors: np.ndarray,
+        output_dir: Path,
+    ) -> None:
+        x = np.arange(len(datasets))
+        width = 0.8 / len(models)
+
+        _, ax = plt.subplots(figsize=(12, 6))
+
+        for i, model in enumerate(models):
+            psnr_vals = [results[model][dataset].get("PSNR", 0.0) for dataset in datasets]
+            offset = (i - len(models) / 2 + 0.5) * width
+            rects = ax.bar(x + offset, psnr_vals, width, label=model, color=colors[i])
+            ax.bar_label(rects, padding=3, fmt="%.1f", fontsize=9)
+
+        ax.set_ylabel("PSNR (↑)", fontsize=12)
+        ax.set_title("Quality Stability Across Datasets", fontsize=14)
+        ax.set_xticks(x)
+        ax.set_xticklabels(datasets, fontsize=11)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.2), ncol=len(models))
+
+        all_psnr = [results[metric][dataset].get("PSNR", 0.0) for metric in models for dataset in datasets]
+        valid_psnr = [v for v in all_psnr if v > 0]
+        if valid_psnr:
+            ax.set_ylim(bottom=max(0, min(valid_psnr) - 2), top=max(valid_psnr) + 2)
+
+        plot_path = output_dir / "plot_3_bar_stability.png"
+        plt.savefig(plot_path, bbox_inches="tight", dpi=300)
+        plt.close()
+        logger.info(f"Grouped Bar chart saved to '{plot_path}'")

@@ -2234,6 +2234,7 @@ version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "einops" },
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "opencv-python" },
@@ -2251,6 +2252,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "einops", specifier = ">=0.8.2" },
+    { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "opencv-python", specifier = ">=4.13.0.92" },

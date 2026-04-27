@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "einops>=0.8.2",
+    "matplotlib>=3.10.8",
     "numpy>=2.4.4",
     "omegaconf>=2.3.0",
     "opencv-python>=4.13.0.92",

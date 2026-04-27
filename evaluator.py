@@ -1,5 +1,6 @@
 import importlib
 import io
+import time
 import warnings
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -41,6 +42,14 @@ class Evaluator:
 
         self._init_model(config_path)
         self._init_perceptual_metrics()
+
+        if self.device.type == "cuda":
+            if torch.cuda.is_bf16_supported():
+                self.autocast_dtype = torch.bfloat16
+            else:
+                self.autocast_dtype = torch.float16
+        else:
+            self.autocast_dtype = torch.bfloat16
 
     def _init_model(self, config_path: Path) -> None:
         self.model_name = config_path.parent.name
@@ -107,7 +116,7 @@ class Evaluator:
                 pad = 16
                 lr_img_patch_padded = F.pad(lr_img_patch, (pad, pad, pad, pad), mode="replicate")
 
-                with torch.autocast(device_type=self.device.type):
+                with torch.autocast(device_type=self.device.type, dtype=self.autocast_dtype):
                     sr_img_patch_padded = self.model(lr_img_patch_padded.unsqueeze(0)).squeeze(0).cpu()
 
                 sr_img_patch_padded = sr_img_patch_padded.float()
@@ -143,7 +152,7 @@ class Evaluator:
         else:
             lr_tensor_padded = lr_img_tensor
 
-        with torch.autocast(device_type=self.device.type):
+        with torch.autocast(device_type=self.device.type, dtype=self.autocast_dtype):
             sr_tensor_padded = self.model(lr_tensor_padded.unsqueeze(0)).squeeze(0)
 
         sr_tensor_padded = sr_tensor_padded.float()
@@ -182,7 +191,11 @@ class Evaluator:
         dataloader: DataLoader,
         dataset_name: str,
     ) -> dict[str, float]:
-        scores = {"psnr": [], "ssim": [], "lpips": [], "clipiqa": [], "musiq": []}
+        scores = {"psnr": [], "ssim": [], "lpips": [], "clipiqa": [], "musiq": [], "time": []}
+
+        starter = torch.cuda.Event(enable_timing=True)
+        ender = torch.cuda.Event(enable_timing=True)
+        is_cuda = self.device.type == "cuda"
 
         for batch in tqdm(
             dataloader, desc=f"Evaluating {self.model_name} on {dataset_name}", total=len(dataloader), leave=False
@@ -190,7 +203,23 @@ class Evaluator:
             lr_img_tensor = batch["lr"][0].to(device=self.device, non_blocking=True)
             hr_img_tensor = batch["hr"][0].to(device=self.device, non_blocking=True)
 
+            if is_cuda:
+                torch.cuda.synchronize()
+                starter.record()
+            else:
+                start_time = time.perf_counter()
+
             sr_img_tensor = self._run_model(lr_img_tensor)
+
+            if is_cuda:
+                ender.record()
+                torch.cuda.synchronize()
+                inference_time = starter.elapsed_time(ender) / 1000.0
+            else:
+                inference_time = time.perf_counter() - start_time
+
+            scores["time"].append(inference_time)
+
             sr_img_tensor = sr_img_tensor.float().clamp(0, 1)
 
             scores["psnr"].append(calculate_psnr(sr_img_tensor, hr_img_tensor, crop_border=self.scaling_factor))
@@ -209,6 +238,7 @@ class Evaluator:
             "LPIPS": float(np.mean(scores["lpips"])),
             "CLIPIQA": float(np.mean(scores["clipiqa"])),
             "MUSIQ": float(np.mean(scores["musiq"])),
+            "Time": float(np.sum(scores["time"])),
         }
 
     @torch.inference_mode()

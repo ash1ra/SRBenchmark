@@ -44,7 +44,7 @@ class Benchmark:
         self,
         config_paths: list[Path],
         dataset_paths: list[Path],
-        save_csv_path: Path | None = None,
+        output_dir: Path | None = None,
     ) -> None:
         results = {}
 
@@ -57,14 +57,21 @@ class Benchmark:
             model_results = evaluator.evaluate(dataset_paths)
             results[model_name] = model_results
 
-            self.visualizer.print_results_table(model_name, model_results)
+            stats = evaluator.get_model_stats((3, 64, 64))
+
+            for dataset_name in model_results:
+                model_results[dataset_name]["Params (M)"] = stats["params"] / 1e6  # type: ignore
+                model_results[dataset_name]["FLOPs (G)"] = stats["macs"] / 1e9 * 2  # type: ignore
 
             del evaluator
             gc.collect()
             torch.cuda.empty_cache()
 
-        if save_csv_path and results:
-            self.visualizer.save_benchmark_csv(results, save_csv_path)
+        self.visualizer.print_comparative_table(results)
+
+        if output_dir and results:
+            self.visualizer.generate_plots(results, output_dir)
+            self.visualizer.save_benchmark_csv(results, output_dir)
 
     def upscale(
         self,

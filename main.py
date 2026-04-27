@@ -1,6 +1,5 @@
 import argparse
 import platform
-import sys
 from pathlib import Path
 
 import torch
@@ -198,9 +197,9 @@ def main() -> None:
         if not args.datasets:
             parser.error("The --datasets argument is required for 'benchmark' task")
 
-        save_csv_path = args.output[0] if args.output else Path("results/benchmark.csv")
+        output_path = args.output[0] if args.output else Path("results")
         logger.info(f"Starting benchmark on datasets: {[d.name for d in args.datasets]}")
-        benchmark_app.evaluate(config_paths, args.datasets, save_csv_path)
+        benchmark_app.evaluate(config_paths, args.datasets, output_path)
 
     if "upscale" in args.task:
         if not args.input or not args.output:
