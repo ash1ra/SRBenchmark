@@ -3,12 +3,11 @@ from pathlib import Path
 from typing import Literal
 
 import torch
-import yaml
 from torch.nn import functional as F
 
+from core_utils import ModelConfig, imresize
 from evaluator import Evaluator
 from logger import logger
-from core_utils import imresize
 from visualizer import Visualizer
 
 
@@ -104,8 +103,7 @@ class Benchmark:
         hr_img_tensors = [self.visualizer.read_image(path) for path in hr_img_paths]
         lr_img_tensors = []
 
-        with open(config_paths[0], "r", encoding="UTF-8") as f:
-            scaling_factor = yaml.safe_load(f)["model_params"]["scaling_factor"]
+        scaling_factor = ModelConfig.from_yaml(config_paths[0]).scaling_factor
 
         for i, hr_img_tensor in enumerate(hr_img_tensors):
             lr_img_path = lr_img_paths[i] if lr_img_paths else None

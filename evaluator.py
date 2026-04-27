@@ -8,7 +8,6 @@ from typing import Literal, cast
 import numpy as np
 import pyiqa
 import torch
-import yaml
 from ptflops import get_model_complexity_info
 from safetensors.torch import load_file
 from torch import Tensor, nn
@@ -17,8 +16,8 @@ from torch.utils.data import DataLoader
 from torchvision.io import ImageReadMode, read_image
 from tqdm import tqdm
 
+from core_utils import ModelConfig, calculate_psnr, calculate_ssim, imresize
 from dataset import BenchmarkDataset
-from core_utils import calculate_psnr, calculate_ssim, imresize
 
 
 class Evaluator:
@@ -31,11 +30,10 @@ class Evaluator:
         num_workers: int = 4,
         prefetch_factor: int = 4,
     ) -> None:
-        with open(config_path, "r", encoding="UTF-8") as f:
-            self.config = yaml.safe_load(f)
+        self.config = ModelConfig.from_yaml(config_path)
 
         self.device = torch.device(device)
-        self.scaling_factor = self.config["model_params"]["scaling_factor"]
+        self.scaling_factor = self.config.scaling_factor
         self.tile_size = tile_size
         self.tile_overlap = tile_overlap
         self.num_workers = num_workers
@@ -49,11 +47,11 @@ class Evaluator:
         self.module_path = f"models.{self.model_name}.model"
 
         self.model_class = getattr(importlib.import_module(self.module_path), self.model_name)
-        self.model = cast(nn.Module, self.model_class(**self.config["model_params"])).to(self.device)
+        self.model = cast(nn.Module, self.model_class(**self.config.model_params)).to(self.device)
 
-        self.weights_path = config_path.parent / self.config["weights_path"]
+        self.weights_path = config_path.parent / self.config.weights_path
 
-        if self.weights_path.suffix == ".pth":
+        if self.weights_path.suffix in [".pt", ".pth"]:
             self.model.load_state_dict(torch.load(self.weights_path, map_location=self.device, weights_only=True))
         elif self.weights_path.suffix == ".safetensors":
             self.model.load_state_dict(load_file(self.weights_path, device=str(self.device)))
@@ -131,7 +129,7 @@ class Evaluator:
         if self.tile_size is not None and self.tile_size > 0:
             return self._run_model_tiled(lr_img_tensor)
 
-        window_size = self.config.get("model_params", {}).get("window_size", 16)
+        window_size = self.config.window_size
 
         _, lr_img_height, lr_img_width = lr_img_tensor.shape
         padding_right = (window_size - (lr_img_width % window_size)) % window_size

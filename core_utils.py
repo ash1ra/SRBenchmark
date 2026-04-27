@@ -1,11 +1,37 @@
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional, overload
 
 import numpy as np
 import torch
+import yaml
 from einops import einsum, rearrange, repeat
 from torch import Tensor
 from torch.nn import functional as F
+
+
+@dataclass
+class ModelConfig:
+    model_name: str
+    scaling_factor: int
+    window_size: int
+    weights_path: str
+    model_params: dict
+
+    @classmethod
+    def from_yaml(cls, config_path: Path) -> "ModelConfig":
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        model_params = data.get("model_params", {})
+
+        return cls(
+            model_name=config_path.parent.name,
+            scaling_factor=model_params.get("scaling_factor", 4),
+            window_size=model_params.get("window_size", 16),
+            weights_path=data.get("weights_path", ""),
+            model_params=model_params,
+        )
 
 
 def get_available_models(models_dir: Path) -> list[str]:
