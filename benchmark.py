@@ -61,7 +61,7 @@ class Benchmark:
 
             for dataset_name in model_results:
                 model_results[dataset_name]["Params (M)"] = stats["params"] / 1e6  # type: ignore
-                model_results[dataset_name]["FLOPs (G)"] = stats["macs"] / 1e9 * 2  # type: ignore
+                model_results[dataset_name]["FLOPs (G)"] = stats["flops"] / 1e9  # type: ignore
 
             del evaluator
             gc.collect()

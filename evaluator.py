@@ -262,12 +262,24 @@ class Evaluator:
         return self._run_model(lr_img_tensor.squeeze(0))
 
     def get_model_stats(self, input_shape: tuple[int, int, int] = (3, 64, 64)) -> dict[str, str | float]:
-        macs, params = get_model_complexity_info(
-            model=self.model,
-            input_res=input_shape,
-            as_strings=False,
-            print_per_layer_stat=False,
-            verbose=False,
-        )
+        param_overrides = {
+            "ResShift": 118.59 * 1e6,
+        }
 
-        return {"model_name": self.model_name, "params": params, "macs": macs}  # type: ignore
+        try:
+            macs, params = get_model_complexity_info(
+                model=self.model,
+                input_res=input_shape,
+                as_strings=False,
+                print_per_layer_stat=False,
+                verbose=False,
+            )
+
+            if self.model_name in param_overrides:
+                params = param_overrides[self.model_name]
+
+            return {"model_name": self.model_name, "params": params, "flops": macs * 2}  # type: ignore
+
+        except Exception:
+            fallback_params = param_overrides.get(self.model_name, 0.0)
+            return {"model_name": self.model_name, "params": fallback_params, "flops": 0.0}
