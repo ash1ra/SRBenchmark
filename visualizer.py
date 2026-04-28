@@ -371,25 +371,30 @@ class Visualizer:
             return
 
         datasets = list(results[models[0]].keys())
-        output_dir.mkdir(exist_ok=True, parents=True)
+        plots_dir = output_dir / "plots"
+        plots_dir.mkdir(exist_ok=True, parents=True)
 
         avg_metrics = {model: {} for model in models}
-        metrics_list = ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ", "Time", "Params (M)", "MACs (G)"]
+        metrics_list = ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ", "Time", "Params (M)", "FLOPs (G)"]
 
         for model in models:
             for metric in metrics_list:
-                vals = [
+                values = [
                     results[model][dataset].get(metric, 0.0)
                     for dataset in datasets
                     if results[model][dataset].get(metric, 0.0) > 0.0
                 ]
-                avg_metrics[model][metric] = sum(vals) / len(vals) if vals else 0.0
+                avg_metrics[model][metric] = sum(values) / len(values) if values else 0.0
 
         colors = cm.get_cmap("tab10")(np.linspace(0, 1, len(models)))
 
-        self._plot_scatter_tradeoff(models, avg_metrics, colors, output_dir)
-        self._plot_radar_balance(models, avg_metrics, colors, output_dir)
-        self._plot_grouped_bar_stability(models, datasets, results, colors, output_dir)
+        self._plot_scatter_tradeoff(models, avg_metrics, colors, plots_dir, metric_y="PSNR", higher_is_better=True)
+        self._plot_scatter_tradeoff(models, avg_metrics, colors, plots_dir, metric_y="MUSIQ", higher_is_better=True)
+
+        self._plot_radar_balance(models, avg_metrics, datasets, colors, plots_dir)
+
+        for metric in ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]:
+            self._plot_grouped_bar_stability(models, datasets, results, metric, colors, plots_dir)
 
     def _plot_scatter_tradeoff(
         self,
@@ -397,36 +402,71 @@ class Visualizer:
         avg_metrics: dict,
         colors: np.ndarray,
         output_dir: Path,
+        metric_y: str,
+        higher_is_better: bool,
     ) -> None:
         plt.figure(figsize=(10, 6))
 
+        unknown_params_plotted = False
+
         for i, model in enumerate(models):
             x = avg_metrics[model].get("Time", 0.0)
-            y = avg_metrics[model].get("PSNR", 0.0)
-            s = avg_metrics[model].get("Params (M)", 0.0) * 15 + 50
+            y = avg_metrics[model].get(metric_y, 0.0)
+            params = avg_metrics[model].get("Params (M)", 0.0)
 
             if x > 0 and y > 0:
-                plt.scatter(x, y, s=s, color=colors[i], label=model, alpha=0.7, edgecolors="black", linewidth=1)
-                plt.annotate(model, (x, y), xytext=(8, 0), textcoords="offset points", va="center", fontsize=10)
+                if params > 0.0:
+                    s = params * 15 + 50
+                    plt.scatter(
+                        x, y, s=s, color=colors[i], label=model, alpha=0.7, edgecolors="black", linewidth=1, marker="o"
+                    )
+                else:
+                    plt.scatter(
+                        x,
+                        y,
+                        s=200,
+                        color=colors[i],
+                        label=model,
+                        alpha=0.9,
+                        marker="X",
+                        edgecolors="black",
+                        linewidth=1,
+                    )
+                    unknown_params_plotted = True
 
-        plt.xlabel("Inference Time per Image (seconds) ↓", fontsize=12)
-        plt.ylabel("Average PSNR ↑", fontsize=12)
-        plt.title("Trade-off: Speed vs Quality\n(Bubble size represents Model Parameters in Millions)", fontsize=14)
+                plt.annotate(model, (x, y), xytext=(12, 0), textcoords="offset points", va="center", fontsize=10)
+
+        arrow = "↑" if higher_is_better else "↓"
+        plt.xlabel("Inference Time per Dataset (seconds) ↓", fontsize=12)
+        plt.ylabel(f"Average {metric_y} {arrow}", fontsize=12)
+
+        title = f"Trade-off: Speed vs {metric_y} Quality\n(Bubble size represents Model Parameters in Millions)"
+        if unknown_params_plotted:
+            title += "\n* Models marked with 'X' have unknown parameter counts"
+
+        plt.title(title, fontsize=12)
         plt.grid(True, linestyle="--", alpha=0.6)
 
-        plot_path = output_dir / "plot_1_scatter_tradeoff.png"
+        plot_path = output_dir / f"scatter_tradeoff_{metric_y}.png"
         plt.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close()
-        logger.info(f"Scatter plot saved to '{plot_path}'")
+        logger.info(f"Scatter plot ({metric_y}) saved to {plot_path}")
 
-    def _plot_radar_balance(self, models: list[str], avg_metrics: dict, colors: np.ndarray, output_dir: Path) -> None:
+    def _plot_radar_balance(
+        self,
+        models: list[str],
+        avg_metrics: dict,
+        datasets: list[str],
+        colors: np.ndarray,
+        output_dir: Path,
+    ) -> None:
         radar_metrics = ["PSNR", "SSIM", "CLIPIQA", "MUSIQ", "LPIPS"]
         min_max = {}
 
         for metric in radar_metrics:
-            vals = [avg_metrics[model][metric] for model in models if avg_metrics[model][metric] > 0]
-            if vals:
-                min_max[metric] = {"min": min(vals), "max": max(vals)}
+            values = [avg_metrics[model][metric] for model in models if avg_metrics[model][metric] > 0]
+            if values:
+                min_max[metric] = {"min": min(values), "max": max(values)}
             else:
                 min_max[metric] = {"min": 0, "max": 1}
 
@@ -454,18 +494,28 @@ class Visualizer:
             ax.fill(angles, values, color=colors[i], alpha=0.1)
 
         plt.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
-        plt.title("Model Perception-Distortion Balance\n(Further from center = Better)", size=14, y=1.1)
 
-        plot_path = output_dir / "plot_2_radar_balance.png"
+        dataset_str = ", ".join(datasets)
+        if len(dataset_str) > 50:
+            dataset_str = dataset_str[:47] + "..."
+
+        plt.title(
+            f"Model Perception-Distortion Balance\n(Further from center = Better)\nAveraged across: {dataset_str}",
+            size=12,
+            y=1.1,
+        )
+
+        plot_path = output_dir / "radar_balance.png"
         plt.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close()
-        logger.info(f"Radar chart saved to '{plot_path}'")
+        logger.info(f"Radar chart saved to {plot_path}")
 
     def _plot_grouped_bar_stability(
         self,
         models: list[str],
         datasets: list[str],
         results: dict,
+        metric: str,
         colors: np.ndarray,
         output_dir: Path,
     ) -> None:
@@ -474,24 +524,32 @@ class Visualizer:
 
         _, ax = plt.subplots(figsize=(12, 6))
 
-        for i, model in enumerate(models):
-            psnr_vals = [results[model][dataset].get("PSNR", 0.0) for dataset in datasets]
-            offset = (i - len(models) / 2 + 0.5) * width
-            rects = ax.bar(x + offset, psnr_vals, width, label=model, color=colors[i])
-            ax.bar_label(rects, padding=3, fmt="%.1f", fontsize=9)
+        higher_is_better = metric != "LPIPS"
+        arrow = "↑" if higher_is_better else "↓"
 
-        ax.set_ylabel("PSNR (↑)", fontsize=12)
-        ax.set_title("Quality Stability Across Datasets", fontsize=14)
+        for i, model in enumerate(models):
+            metric_vals = [results[model][dataset].get(metric, 0.0) for dataset in datasets]
+            offset = (i - len(models) / 2 + 0.5) * width
+            rects = ax.bar(x + offset, metric_vals, width, label=model, color=colors[i])
+
+            fmt_str = "%.3f" if metric in ["LPIPS", "SSIM"] else "%.1f"
+            ax.bar_label(rects, padding=3, fmt=fmt_str, fontsize=9)
+
+        ax.set_ylabel(f"{metric} ({arrow})", fontsize=12)
+        ax.set_title(f"{metric} Stability Across Datasets", fontsize=14)
         ax.set_xticks(x)
         ax.set_xticklabels(datasets, fontsize=11)
-        ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.2), ncol=len(models))
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.2), ncol=min(len(models), 8))
 
-        all_psnr = [results[metric][dataset].get("PSNR", 0.0) for metric in models for dataset in datasets]
-        valid_psnr = [v for v in all_psnr if v > 0]
-        if valid_psnr:
-            ax.set_ylim(bottom=max(0, min(valid_psnr) - 2), top=max(valid_psnr) + 2)
+        all_vals = [results[metric][dataset].get(metric, 0.0) for metric in models for dataset in datasets]
+        valid_vals = [v for v in all_vals if v > 0]
+        if valid_vals:
+            diff = max(valid_vals) - min(valid_vals)
+            padding = diff * 0.2 if diff > 0 else max(valid_vals) * 0.1
+            bottom_limit = max(0, min(valid_vals) - padding) if higher_is_better else 0
+            ax.set_ylim(bottom=bottom_limit, top=max(valid_vals) + padding)
 
-        plot_path = output_dir / "plot_3_bar_stability.png"
+        plot_path = output_dir / f"bar_stability_{metric}.png"
         plt.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close()
-        logger.info(f"Grouped Bar chart saved to '{plot_path}'")
+        logger.info(f"Grouped Bar chart ({metric}) saved to {plot_path}")
