@@ -191,7 +191,7 @@ class Evaluator:
         dataloader: DataLoader,
         dataset_name: str,
     ) -> dict[str, float]:
-        scores = {"psnr": [], "ssim": [], "lpips": [], "clipiqa": [], "musiq": [], "time": []}
+        scores = {"psnr": [], "ssim": [], "lpips": [], "clipiqa": [], "musiq": [], "time": [], "vram": []}
 
         starter = torch.cuda.Event(enable_timing=True)
         ender = torch.cuda.Event(enable_timing=True)
@@ -205,6 +205,7 @@ class Evaluator:
 
             if is_cuda:
                 torch.cuda.synchronize()
+                torch.cuda.reset_peak_memory_stats(self.device)
                 starter.record()
             else:
                 start_time = time.perf_counter()
@@ -215,8 +216,11 @@ class Evaluator:
                 ender.record()
                 torch.cuda.synchronize()
                 inference_time = starter.elapsed_time(ender) / 1000.0
+
+                scores["vram"].append(torch.cuda.max_memory_reserved(self.device) / (1024 * 1024 * 1024))
             else:
                 inference_time = time.perf_counter() - start_time
+                scores["vram"].append(0.0)
 
             scores["time"].append(inference_time)
 
@@ -239,6 +243,7 @@ class Evaluator:
             "CLIPIQA": float(np.mean(scores["clipiqa"])),
             "MUSIQ": float(np.mean(scores["musiq"])),
             "Time": float(np.sum(scores["time"])),
+            "VRAM (GB)": float(np.max(scores["vram"])),
         }
 
     @torch.inference_mode()

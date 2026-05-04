@@ -51,14 +51,16 @@ class Visualizer:
         models = list(results.keys())
         if not models:
             return
+
         datasets = list(results[models[0]].keys())
 
-        metrics = ["Params (M)", "FLOPs (G)", "Time", "PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]
+        metrics = ["Params (M)", "FLOPs (G)", "Time", "VRAM (GB)", "PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]
 
         directions = {
             "Params (M)": False,
             "FLOPs (G)": False,
             "Time": False,
+            "VRAM (GB)": False,
             "PSNR": True,
             "SSIM": True,
             "LPIPS": False,
@@ -70,6 +72,7 @@ class Visualizer:
             "Params (M) (↓)",
             "FLOPs (G) (↓)",
             "Time (↓)",
+            "VRAM (GB) (↓)",
             "PSNR (↑)",
             "SSIM (↑)",
             "LPIPS (↓)",
@@ -77,7 +80,7 @@ class Visualizer:
             "MUSIQ (↑)",
         ]
 
-        table_width = 135
+        table_width = 171
         table_str = f"\n{'=' * table_width}\n"
         table_str += f"{'Comparative Benchmark Results':^{table_width}}\n"
         table_str += f"{'=' * table_width}\n"
@@ -86,9 +89,9 @@ class Visualizer:
             table_str += f"Dataset: {dataset}\n"
             table_str += f"{'-' * table_width}\n"
 
-            header_str = f"{'Model':<15} |"
+            header_str = f"{'Model':<18} |"
             for h in headers:
-                header_str += f" {h:>11} |"
+                header_str += f" {h:>14} |"
             table_str += header_str[:-1] + "\n"
             table_str += f"{'-' * table_width}\n"
 
@@ -112,12 +115,12 @@ class Visualizer:
                         top_markers[metric][model] = ""
 
             for model in models:
-                row_str = f"{model:<15} |"
+                row_str = f"{model:<18} |"
                 for metric in metrics:
                     val = results[model][dataset].get(metric, 0.0)
                     marker = top_markers[metric][model]
 
-                    if metric in ["Params (M)", "FLOPs (G)"]:
+                    if metric in ["Params (M)", "FLOPs (G)", "VRAM (GB)"]:
                         val_str = f"{val:.2f}"
                     elif metric == "Time":
                         val_str = f"{val:.3f}"
@@ -127,7 +130,7 @@ class Visualizer:
                         val_str = f"{val:.4f}"
 
                     cell = f"{val_str}{marker}"
-                    row_str += f" {cell:>11} |"
+                    row_str += f" {cell:>14} |"
                 table_str += row_str[:-1] + "\n"
             table_str += f"{'=' * table_width}\n"
 
@@ -139,7 +142,7 @@ class Visualizer:
         output_img_path: Path,
     ) -> None:
         flat_data = []
-        metrics_order = ["Params (M)", "FLOPs (G)", "Time", "PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]
+        metrics_order = ["Params (M)", "FLOPs (G)", "VRAM (GB)", "Time", "PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]
 
         for model_name, datasets in results.items():
             for dataset_name, metrics in datasets.items():
@@ -154,7 +157,7 @@ class Visualizer:
         df = pd.DataFrame(flat_data)
         df.to_csv(output_img_path / "benchmark.csv", index=False, float_format="%.4f")
 
-        logger.info(f"Table with results saved to {output_img_path}")
+        logger.info(f"Table with results saved to '{output_img_path / 'benchmark.csv'}'")
 
     def _draw_crop_preview(self) -> None:
         if self.crop_selection_params is None:
@@ -375,7 +378,7 @@ class Visualizer:
         plots_dir.mkdir(exist_ok=True, parents=True)
 
         avg_metrics = {model: {} for model in models}
-        metrics_list = ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ", "Time", "Params (M)", "FLOPs (G)"]
+        metrics_list = ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ", "Time", "Params (M)", "FLOPs (G)", "VRAM (GB)"]
 
         for model in models:
             for metric in metrics_list:
@@ -393,7 +396,7 @@ class Visualizer:
 
         self._plot_radar_balance(models, avg_metrics, datasets, colors, plots_dir)
 
-        for metric in ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]:
+        for metric in ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ", "VRAM (GB)"]:
             self._plot_grouped_bar_stability(models, datasets, results, metric, colors, plots_dir)
 
     def _plot_scatter_tradeoff(
@@ -450,7 +453,7 @@ class Visualizer:
         plot_path = output_dir / f"scatter_tradeoff_{metric_y}.png"
         plt.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close()
-        logger.info(f"Scatter plot ({metric_y}) saved to {plot_path}")
+        logger.info(f"Scatter plot ({metric_y}) saved to '{plot_path}'")
 
     def _plot_radar_balance(
         self,
@@ -508,7 +511,7 @@ class Visualizer:
         plot_path = output_dir / "radar_balance.png"
         plt.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close()
-        logger.info(f"Radar chart saved to {plot_path}")
+        logger.info(f"Radar chart saved to '{plot_path}'")
 
     def _plot_grouped_bar_stability(
         self,
@@ -524,7 +527,7 @@ class Visualizer:
 
         _, ax = plt.subplots(figsize=(12, 6))
 
-        higher_is_better = metric != "LPIPS"
+        higher_is_better = metric not in ["LPIPS", "VRAM (GB)"]
         arrow = "↑" if higher_is_better else "↓"
 
         for i, model in enumerate(models):
@@ -552,4 +555,4 @@ class Visualizer:
         plot_path = output_dir / f"bar_stability_{metric}.png"
         plt.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close()
-        logger.info(f"Grouped Bar chart ({metric}) saved to {plot_path}")
+        logger.info(f"Grouped Bar chart ({metric}) saved to '{plot_path}'")
