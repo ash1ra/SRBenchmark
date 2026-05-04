@@ -11,10 +11,12 @@ environ["OPENCV_LOG_LEVEL"] = "ERROR"
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import openpyxl
 import pandas as pd
 import seaborn as sns
 import torch
 import torchvision.transforms.v2 as transforms
+from openpyxl.styles import Alignment, Font
 from PIL import Image, ImageDraw, ImageFont
 from torch import Tensor
 from torchvision.io import ImageReadMode, read_image, write_png
@@ -149,28 +151,69 @@ class Visualizer:
 
         logger.info(table_str)
 
-    def save_benchmark_csv(
+    def save_benchmark_excel(
         self,
         results: dict[str, dict[str, dict[str, float]]],
-        output_img_path: Path,
+        output_directory: Path,
     ) -> None:
-        flat_data = []
-        metrics_order = ["Params (M)", "FLOPs (G)", "VRAM (GB)", "Time", "PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ"]
+        models = list(results.keys())
+        if not models:
+            return
 
-        for model_name, datasets in results.items():
-            for dataset_name, metrics in datasets.items():
-                row = {"Model": model_name, "Dataset": dataset_name}
-                for metric in metrics_order:
-                    if metric in metrics:
-                        row[metric] = metrics[metric]  # type: ignore
-                flat_data.append(row)
+        datasets = list(results[models[0]].keys())
 
-        Path(output_img_path).parent.mkdir(exist_ok=True, parents=True)
+        metrics_order = [
+            "Params (M)",
+            "FLOPs (G)",
+            "VRAM (GB)",
+            "Time",
+            "PSNR",
+            "SSIM",
+            "LPIPS",
+            "CLIPIQA",
+            "MUSIQ",
+        ]
 
-        df = pd.DataFrame(flat_data)
-        df.to_csv(output_img_path / "benchmark.csv", index=False, float_format="%.4f")
+        output_directory.mkdir(exist_ok=True, parents=True)
+        file_path = output_directory / "benchmark_results.xlsx"
 
-        logger.info(f"Table with results saved to '{output_img_path / 'benchmark.csv'}'")
+        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+            for dataset_name in datasets:
+                sheet_data = []
+
+                for model_name, model_datasets in results.items():
+                    if dataset_name in model_datasets:
+                        row = {"Model": model_name}
+                        metrics = model_datasets[dataset_name]
+                        for metric in metrics_order:
+                            if metric in metrics:
+                                row[metric] = metrics[metric]  # type: ignore
+                        sheet_data.append(row)
+
+                df = pd.DataFrame(sheet_data)
+
+                df.to_excel(writer, sheet_name=dataset_name, index=False)
+
+                worksheet = writer.sheets[dataset_name]
+
+                worksheet.freeze_panes = "A2"
+
+                for col_idx, column_name in enumerate(df.columns, 1):
+                    col_letter = openpyxl.utils.get_column_letter(col_idx)  # type: ignore
+
+                    max_length = max(df[column_name].astype(str).map(len).max(), len(str(column_name)))
+                    worksheet.column_dimensions[col_letter].width = max_length + 3
+
+                    header_cell = worksheet.cell(row=1, column=col_idx)
+                    header_cell.font = Font(bold=True)
+                    header_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+                    for row_idx in range(2, len(df) + 2):
+                        cell = worksheet.cell(row=row_idx, column=col_idx)
+                        if isinstance(cell.value, (int, float)):
+                            cell.number_format = "0.0000"
+
+        logger.info(f"Excel report saved to '{file_path}'")
 
     def _draw_crop_preview(self) -> None:
         if self.crop_selection_params is None:

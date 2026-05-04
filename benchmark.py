@@ -71,7 +71,7 @@ class Benchmark:
 
         if output_dir and results:
             self.visualizer.generate_plots(results, output_dir)
-            self.visualizer.save_benchmark_csv(results, output_dir)
+            self.visualizer.save_benchmark_excel(results, output_dir)
 
     def upscale(
         self,

@@ -20,19 +20,30 @@ def sample_results():
     }
 
 
-def test_save_benchmark_csv(tmp_path: Path, sample_results):
+def test_save_benchmark_excel(tmp_path: Path, sample_results):
     visualizer = Visualizer()
     output_dir = tmp_path / "results"
-    output_dir.mkdir()
 
-    visualizer.save_benchmark_csv(sample_results, output_dir)
+    visualizer.save_benchmark_excel(sample_results, output_dir)
 
-    csv_file = output_dir / "benchmark.csv"
-    assert csv_file.exists()
+    excel_file = output_dir / "benchmark_results.xlsx"
+    assert excel_file.exists()
 
-    df = pd.read_csv(csv_file)
-    assert list(df.columns) == ["Model", "Dataset", "Params (M)", "Time", "PSNR", "SSIM"]
-    assert len(df) == 4
+    sheets = pd.read_excel(excel_file, sheet_name=None)
+
+    assert list(sheets.keys()) == ["Set5", "Set14"]
+
+    df_set5 = sheets["Set5"]
+
+    expected_columns = ["Model", "Params (M)", "Time", "PSNR", "SSIM"]
+    assert list(df_set5.columns) == expected_columns
+
+    assert len(df_set5) == 2
+
+    assert df_set5.iloc[0]["Model"] == "Model_A"
+    assert df_set5.iloc[0]["PSNR"] == 32.0
+    assert df_set5.iloc[1]["Model"] == "Model_B"
+    assert df_set5.iloc[1]["PSNR"] == 34.0
 
 
 def test_generate_plots(tmp_path: Path, sample_results):
