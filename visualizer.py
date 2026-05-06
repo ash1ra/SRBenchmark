@@ -445,9 +445,8 @@ class Visualizer:
         average_dataframe = dataframe_for_averaging.groupby("Model").mean(numeric_only=True).reset_index()
         average_dataframe = average_dataframe.fillna(0.0)
 
-        palette = sns.color_palette("husl", n_colors=len(model_names))
+        palette = sns.color_palette("deep", n_colors=len(model_names))
         color_mapping = dict(zip(model_names, palette))
-        dataset_names = list(results[model_names[0]].keys())
 
         if "PSNR" in average_dataframe.columns:
             self._plot_scatter_tradeoff(
@@ -459,7 +458,7 @@ class Visualizer:
                 average_dataframe, color_mapping, plots_dir, metric_y="MUSIQ", higher_is_better=True
             )
 
-        self._plot_radar_balance(average_dataframe, dataset_names, color_mapping, plots_dir)
+        self._plot_radar_balance(average_dataframe, color_mapping, plots_dir)
 
         metrics_to_plot = ["PSNR", "SSIM", "LPIPS", "CLIPIQA", "MUSIQ", "Time", "VRAM (GB)"]
         for metric in metrics_to_plot:
@@ -519,12 +518,10 @@ class Visualizer:
                 )
 
         arrow = "↑" if higher_is_better else "↓"
-        plt.xlabel("Inference Time per Dataset (seconds) ↓", fontsize=12)
+        plt.xlabel("Average Inference Time per Image (seconds) ↓", fontsize=12)
         plt.ylabel(f"Average {metric_y} {arrow}", fontsize=12)
 
-        title = f"Trade-off: Speed vs {metric_y} Quality\n(Bubble size represents Model Parameters in Millions)"
-        if not unknown_params_df.empty:
-            title += "\n* Models marked with 'X' have unknown parameter counts"
+        title = f"Trade-off: Speed vs Quality ({metric_y})"
 
         plt.title(title, fontsize=12)
 
@@ -536,7 +533,6 @@ class Visualizer:
     def _plot_radar_balance(
         self,
         average_dataframe: pd.DataFrame,
-        dataset_names: list[str],
         color_mapping: dict[str, tuple],
         output_directory: Path,
     ) -> None:
@@ -596,12 +592,8 @@ class Visualizer:
             frameon=False,
         )
 
-        dataset_string = ", ".join(dataset_names)
-        if len(dataset_string) > 50:
-            dataset_string = dataset_string[:47] + "..."
-
         plt.title(
-            f"Model Perception-Distortion Balance\n(Further from center = Better)\nAveraged across: {dataset_string}",
+            "Model Perception-Distortion Balance",
             size=14,
             loc="center",
             pad=30,
@@ -632,17 +624,35 @@ class Visualizer:
             palette=color_mapping,
         )
 
-        format_string = "%.3f" if metric in ["LPIPS", "SSIM"] else "%.1f"
+        format_string = "%.3f" if metric in ["LPIPS", "SSIM", "Time"] else "%.1f"
         for container in ax.containers:
-            ax.bar_label(container, padding=3, fmt=format_string, fontsize=9)
+            ax.bar_label(container, padding=3, fmt=format_string, fontsize=9, rotation=90)
 
-        ax.set_ylabel(f"{metric} ({arrow})", fontsize=12)
         ax.set_title(f"{metric} Stability Across Datasets", fontsize=14)
         ax.set_xlabel("")
 
+        if metric == "Time":
+            ax.set_yscale("log")
+            ax.set_ylabel(f"{metric} (Log Scale, sec) ({arrow})", fontsize=12)
+            ax.margins(y=0.6)
+        else:
+            ax.set_ylabel(f"{metric} ({arrow})", fontsize=12)
+
+            valid_values = benchmark_dataframe[metric].replace(0.0, pd.NA).dropna()
+            if not valid_values.empty:
+                min_val = valid_values.min()
+                max_val = valid_values.max()
+                difference = max_val - min_val
+
+                padding_top = difference * 0.45 if difference > 0 else max_val * 0.4
+                padding_bottom = difference * 0.1 if difference > 0 else 0
+
+                bottom_limit = max(0, min_val - padding_bottom) if higher_is_better else 0
+                ax.set_ylim(bottom=bottom_limit, top=max_val + padding_top)
+
         unique_models_count = len(benchmark_dataframe["Model"].unique())
         sns.move_legend(
-            ax, "lower center", bbox_to_anchor=(0.5, -0.2), ncol=min(unique_models_count, 8), title=None, frameon=False
+            ax, "lower center", bbox_to_anchor=(0.5, -0.25), ncol=min(unique_models_count, 8), title=None, frameon=False
         )
 
         valid_values = benchmark_dataframe[metric].replace(0.0, pd.NA).dropna()

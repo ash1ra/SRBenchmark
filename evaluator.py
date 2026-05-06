@@ -242,7 +242,7 @@ class Evaluator:
             "LPIPS": float(np.mean(scores["lpips"])),
             "CLIPIQA": float(np.mean(scores["clipiqa"])),
             "MUSIQ": float(np.mean(scores["musiq"])),
-            "Time": float(np.sum(scores["time"])),
+            "Time": float(np.mean(scores["time"])),
             "VRAM (GB)": float(np.max(scores["vram"])),
         }
 

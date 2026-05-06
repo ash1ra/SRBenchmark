@@ -100,7 +100,7 @@ def main() -> None:
         "--crop-size",
         nargs="+",
         type=int,
-        default=64,
+        default=None,
         help="Crop size for creating collages in 'compare' task",
     )
 
