@@ -1,0 +1,9 @@
+task:
+  - benchmark
+
+models:
+  - all
+
+datasets:
+  - "data/Set5"
+  - "data/Set14"

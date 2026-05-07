@@ -1,0 +1,12 @@
+task:
+  - benchmark
+
+models:
+  - all
+
+datasets:
+  - "data/Set5"
+  - "data/Set14"
+  - "data/BSDS100"
+  - "data/Urban100"
+  - "data/Manga109"
